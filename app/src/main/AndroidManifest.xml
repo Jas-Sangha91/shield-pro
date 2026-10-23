@@ -18,8 +18,9 @@
     </queries>
 
     <application
-        android:label="Shield Home"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="Sangha Home"
+        android:icon="@drawable/banner"
+        android:banner="@drawable/banner"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
 
         <activity
