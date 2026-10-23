@@ -73,7 +73,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.function.Supplier;
 
 public class MainActivity extends Activity {
 
@@ -393,7 +392,7 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         tabs.setClipChildren(false);
-        searchBtn = roundButton(R.drawable.ic_search, () -> "Search", this::openSearch);
+        searchBtn = roundButton(R.drawable.ic_search, this::openSearch);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(30), dp(30));
         slp.rightMargin = dp(12);
         tabs.addView(searchBtn, slp);
@@ -459,7 +458,7 @@ public class MainActivity extends Activity {
         vclp.rightMargin = dp(8);
         right.addView(vpnCityView, vclp);
 
-        vpnBtn = roundButton(R.drawable.ic_shield, this::vpnTitle, this::openVpnApp);
+        vpnBtn = roundButton(R.drawable.ic_shield, this::openVpnApp);
         vpnDotBg = new GradientDrawable();
         vpnDotBg.setShape(GradientDrawable.OVAL);
         vpnDotBg.setColor(VPN_OFF);
@@ -468,7 +467,7 @@ public class MainActivity extends Activity {
         vpnDot.setBackground(vpnDotBg);
         vpnBtn.addView(vpnDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
 
-        cogBtn = roundButton(R.drawable.ic_cog, () -> "Settings", this::openSettingsMenu);
+        cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
 
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(30), dp(30));
         blp.topMargin = dp(8);
@@ -531,7 +530,8 @@ public class MainActivity extends Activity {
         tv.setOnFocusChangeListener((v, f) -> {
             styleTabs();
             if (f) {
-                titleView.setText(label);
+                // Top row: leave the big title blank
+                titleView.setText(" ");
                 metaView.setText("");
                 setGlow(NEUTRAL_GLOW);
             }
@@ -568,7 +568,7 @@ public class MainActivity extends Activity {
         render(null, false);
     }
 
-    private FrameLayout roundButton(int iconRes, final Supplier<String> title, final Runnable onClick) {
+    private FrameLayout roundButton(int iconRes, final Runnable onClick) {
         final FrameLayout b = new FrameLayout(this);
         b.setFocusable(true);
         b.setClickable(true);
@@ -588,7 +588,8 @@ public class MainActivity extends Activity {
             icon.setTint(f ? DARK : ICON_IDLE);
             v.animate().scaleX(f ? 1.15f : 1f).scaleY(f ? 1.15f : 1f).setDuration(150).start();
             if (f) {
-                titleView.setText(title.get());
+                // Top row: leave the big title blank
+                titleView.setText(" ");
                 metaView.setText("");
                 setGlow(NEUTRAL_GLOW);
             }
@@ -2264,12 +2265,6 @@ public class MainActivity extends Activity {
         else Toast.makeText(this, "Surfshark isn't installed.", Toast.LENGTH_LONG).show();
     }
 
-    private String vpnTitle() {
-        if (lastVpnState == null) return "VPN";
-        if (!lastVpnState) return "VPN off";
-        return lastWhere != null ? "VPN connected " + DOT + " " + lastWhere : "VPN connected";
-    }
-
     private void registerNet() {
         if (netCallback != null || cm == null) return;
         netCallback = new ConnectivityManager.NetworkCallback() {
@@ -2353,7 +2348,6 @@ public class MainActivity extends Activity {
                 vpnCityView.setVisibility(View.GONE);
             }
         }
-        if (vpnBtn != null && vpnBtn.isFocused()) titleView.setText(vpnTitle());
     }
 
     // ---------- Groups ----------
