@@ -3,43 +3,22 @@ package com.jas.shieldhome;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.Editable;
-import android.text.InputType;
 import android.text.TextUtils;
-import android.text.TextWatcher;
-import android.util.LruCache;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
@@ -47,222 +26,86 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextClock;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.jas.shieldhome.Layout.Folder;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.function.Consumer;
 
+import static com.jas.shieldhome.Ui.COLUMNS;
+import static com.jas.shieldhome.Ui.DARK;
+import static com.jas.shieldhome.Ui.DOCK_GAP;
+import static com.jas.shieldhome.Ui.DOCK_W;
+import static com.jas.shieldhome.Ui.FOLDER_COLUMNS;
+import static com.jas.shieldhome.Ui.FOLDER_H;
+import static com.jas.shieldhome.Ui.FOLDER_W;
+import static com.jas.shieldhome.Ui.GRID_GAP;
+import static com.jas.shieldhome.Ui.GRID_H;
+import static com.jas.shieldhome.Ui.GRID_W;
+import static com.jas.shieldhome.Ui.ICON_IDLE;
+import static com.jas.shieldhome.Ui.MATCH;
+import static com.jas.shieldhome.Ui.NEUTRAL_GLOW;
+import static com.jas.shieldhome.Ui.SEP;
+import static com.jas.shieldhome.Ui.SOFT_TEXT;
+import static com.jas.shieldhome.Ui.VPN_OFF;
+import static com.jas.shieldhome.Ui.VPN_ON;
+import static com.jas.shieldhome.Ui.WRAP;
+import static com.jas.shieldhome.Ui.dominantColor;
+import static com.jas.shieldhome.Ui.timeOfDayColors;
+
+/** The home screen itself: top bar, tabs, the Home and Apps pages, and app tiles. */
 public class MainActivity extends Activity {
 
-    // Dock apps used the very first time only. After that, hold OK on an app to change the dock.
-    private static final String[] DEFAULT_DOCK = {
-            "com.netflix.ninja",
-            "com.amazon.amazonvideo.livingroom",
-            "com.disney.disneyplus",
-            "com.google.android.youtube.tv",
-            "ar.tvplayer.tv"
-    };
-
-    private static final String VPN_APP = "com.surfshark.vpnclient.android";
-    private static final String YOUTUBE_APP = "com.google.android.youtube.tv";
-
-    // Pages (tabs in the top bar)
-    private static final int PAGE_HOME = 0, PAGE_APPS = 1, PAGE_DISCOVER = 2;
-
-    // Groups (sections)
-    private static final String WATCH = "watch", PLAY = "play", TOOLS = "tools";
-    private static final String[] GROUP_ORDER = {WATCH, PLAY, TOOLS};
-
-    private static final List<String> PLAY_PKGS = Arrays.asList(
-            "com.nvidia.tegrazone3",
-            "com.nvidia.geforcenow",
-            "psplay.grill.com",
-            "com.swordfish.lemuroid",
-            "com.google.android.play.games");
-
-    private static final List<String> TOOLS_PKGS = Arrays.asList(
-            "com.surfshark.vpnclient.android",
-            "com.esaba.downloader",
-            "com.cxinventor.file.explorer",
-            "com.android.documentsui",
-            "com.google.android.documentsui",
-            "com.tcl.browser",
-            "com.android.vending",
-            "com.android.gallery3d",
-            "com.google.android.tv",
-            "com.nvidia.inputviewer",
-            "com.android.tv.settings");
-
-    // Rarely used tools that go into a "More tools" folder the first time folders are set up
-    private static final List<String> DEFAULT_FOLDER_PKGS = Arrays.asList(
-            "com.android.vending",
-            "com.cxinventor.file.explorer",
-            "com.android.documentsui",
-            "com.google.android.documentsui",
-            "com.android.gallery3d",
-            "com.google.android.tv",
-            "com.nvidia.inputviewer",
-            "com.android.tv.settings");
-
-    private static final String FOLDER_PREFIX = "f:";
-
-    // Discover (data from TMDB)
-    private static final String TMDB_API = "https://api.themoviedb.org/3";
-    private static final String TMDB_IMG = "https://image.tmdb.org/t/p/";
-    private static final long DISCOVER_REFRESH_MS = 3 * 60 * 60 * 1000L;
-    private static final long SPOT_EVERY_MS = 8000L;
-    private static final int ROW_MAX = 12;
-    private static final int SPOT_COUNT = 5;
-    private static final int POSTER_W = 100, POSTER_H = 150;
-    private static final int SPOT_BG = 0xFF0E1118;
-
-    private static final int COLUMNS = 5;
-    private static final int DOCK_W = 176, DOCK_GAP = 7;
-    private static final int GRID_W = 152, GRID_H = 86, GRID_GAP = 8;
-    private static final int FOLDER_COLUMNS = 4;
-    private static final int FOLDER_W = 128, FOLDER_H = 72;
-    private static final long WEATHER_EVERY_MS = 30 * 60 * 1000L;
-    private static final long VPN_EVERY_MS = 15 * 60 * 1000L;
+    static final int PAGE_HOME = 0, PAGE_DISCOVER = 1, PAGE_APPS = 2;
     private static final long IDLE_AFTER_MS = 20 * 1000L;
-    private static final int NEUTRAL_GLOW = 0xFF3A4A6B;
-    private static final int VPN_ON = 0xFF7BD88F;
-    private static final int VPN_OFF = 0xFFFFB74D;
-    private static final int SOFT_TEXT = 0xB0FFFFFF;
-    private static final int ICON_IDLE = 0xFFC9CDD6;
-    private static final int DARK = 0xFF141A26;
-    private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
-    private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
-    private static final String DEG = "\u00B0";
-    private static final String DOT = "\u00B7";
-    private static final String STAR = "\u2605";
-    private static final String SEP = "   \u00B7   ";
 
-    private static class Item {
-        int id;
-        String type;
-        String title;
-        String poster;
-        String backdrop;
-        String overview;
-        String date;
-        double rating;
-        String year;
+    // Shared with the other parts of the app
+    PackageManager pm;
+    SharedPreferences prefs;
+    final Handler handler = new Handler(Looper.getMainLooper());
+    final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
+    final Images images = new Images();
+    Layout layout;
+    DiscoverPage discover;
+    SearchScreen search;
+    WeatherClock weather;
+    VpnStatus vpn;
+    Menus menus;
 
-        String key() {
-            return type + ":" + id;
-        }
-    }
+    LinearLayout content;
+    TextView titleView, metaView, weatherView, placeView, vpnCityView, clockPlaceView;
+    TextClock timeClock, dateClock;
+    GradientDrawable vpnDotBg;
+    int page = PAGE_HOME;
 
-    private static class Row {
-        String title;
-        final List<Item> items = new ArrayList<>();
-    }
-
-    private static class Folder {
-        String id;
-        String name;
-        String group;
-        final List<String> apps = new ArrayList<>();
-    }
-
-    private PackageManager pm;
-    private SharedPreferences prefs;
-    private ConnectivityManager cm;
-    private final Handler handler = new Handler(Looper.getMainLooper());
-
+    // Screen state
     private ScrollView scroll;
-    private LinearLayout content;
     private LinearLayout weatherRow;
-    private TextView titleView, metaView, hintView, weatherView, placeView, vpnCityView;
-    private TextClock timeClock, dateClock;
-    private TextView clockPlaceView;
-    private TextView tabHome, tabApps, tabDiscover;
-    private FrameLayout searchBtn, vpnBtn, cogBtn;
-    private GradientDrawable vpnDotBg;
+    private TextView hintView;
+    private TextView tabHome, tabDiscover, tabApps;
     private GradientDrawable baseBg, glow;
     private int glowColor = 0x00000000;
     private ValueAnimator glowAnim;
-
-    private final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
-    private final List<String> dock = new ArrayList<>();
-    private final List<String> grid = new ArrayList<>();   // app packages and folder keys, in order
-    private final List<String> hidden = new ArrayList<>(); // apps that are not on Home (still listed in Apps)
-    private final Map<String, Folder> folders = new LinkedHashMap<>();
     private final Map<String, View> tileByPkg = new HashMap<>();
     private final Map<String, Integer> colorByPkg = new HashMap<>();
     private final List<View> allTiles = new ArrayList<>();
     private final Map<View, Float> baseAlpha = new HashMap<>();
     private View firstTile;
-
     private String installedSignature = "";
-    private int page = PAGE_HOME;
-    private boolean arranging = false;
     private String movingPkg = null;
     private boolean swallowBackUp = false;
     private boolean idle = false;
     private List<String> backupDock = new ArrayList<>();
     private List<String> backupGrid = new ArrayList<>();
-    private volatile long lastWeatherFetch = 0;
-
-    private ConnectivityManager.NetworkCallback netCallback;
-    private Boolean lastVpnState = null;
-    private String lastWhere = null;
-    private long lastIpFetch = 0;
-
-    // Discover state
-    private List<Row> discoverRows = null;
-    private List<Item> discoverSpot = new ArrayList<>();
-    private long discoverAt = 0;
-    private long discoverTriedAt = 0;
-    private boolean discoverLoading = false;
-    private boolean discoverError = false;
-    private final Map<String, String> trailerCache = new HashMap<>();
-
-    // Spotlight views
-    private ImageView spotBackdrop;
-    private TextView spotTitle, spotMeta, spotDesc, spotTrailer, spotList, spotSurprise;
-    private final List<View> spotDots = new ArrayList<>();
-    private int spotIndex = 0;
-
-    // My list row
-    private LinearLayout myListSection;
-    private final List<View> myListTiles = new ArrayList<>();
-
-    private final LruCache<String, Bitmap> imageCache = new LruCache<String, Bitmap>(24 * 1024 * 1024) {
-        @Override
-        protected int sizeOf(String key, Bitmap value) {
-            return value.getByteCount();
-        }
-    };
-    private final ExecutorService imagePool = Executors.newFixedThreadPool(4);
 
     private final Runnable weatherTick = new Runnable() {
         @Override
         public void run() {
-            if (System.currentTimeMillis() - lastWeatherFetch >= WEATHER_EVERY_MS) fetchWeather();
+            weather.refreshIfDue();
             if (baseBg != null) baseBg.setColors(timeOfDayColors());
             handler.postDelayed(this, 5 * 60 * 1000L);
         }
@@ -271,8 +114,8 @@ public class MainActivity extends Activity {
     private final Runnable vpnTick = new Runnable() {
         @Override
         public void run() {
-            updateVpn(false);
-            handler.postDelayed(this, VPN_EVERY_MS);
+            vpn.update(false);
+            handler.postDelayed(this, VpnStatus.EVERY_MS);
         }
     };
 
@@ -283,16 +126,6 @@ public class MainActivity extends Activity {
         }
     };
 
-    private final Runnable spotTick = new Runnable() {
-        @Override
-        public void run() {
-            if (page == PAGE_DISCOVER && spotTitle != null && !spotlightFocused() && hasWindowFocus()) {
-                showSpot(spotIndex + 1, true);
-            }
-            handler.postDelayed(this, SPOT_EVERY_MS);
-        }
-    };
-
     // ---------- Lifecycle ----------
 
     @Override
@@ -300,7 +133,12 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         pm = getPackageManager();
         prefs = getSharedPreferences("home", MODE_PRIVATE);
-        cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        layout = new Layout(prefs, installed);
+        discover = new DiscoverPage(this);
+        search = new SearchScreen(this);
+        weather = new WeatherClock(this);
+        vpn = new VpnStatus(this);
+        menus = new Menus(this);
         buildScreen();
     }
 
@@ -311,11 +149,11 @@ public class MainActivity extends Activity {
         refreshInstalled();
         handler.removeCallbacks(weatherTick);
         handler.post(weatherTick);
-        registerNet();
+        vpn.register();
         handler.removeCallbacks(vpnTick);
         handler.post(vpnTick);
-        handler.removeCallbacks(spotTick);
-        if (page == PAGE_DISCOVER && spotTitle != null) handler.postDelayed(spotTick, SPOT_EVERY_MS);
+        discover.stopTicker();
+        if (page == PAGE_DISCOVER) discover.startTicker();
         resetIdle();
     }
 
@@ -325,16 +163,15 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(weatherTick);
         handler.removeCallbacks(vpnTick);
         handler.removeCallbacks(idleRunnable);
-        handler.removeCallbacks(spotTick);
-        unregisterNet();
+        discover.stopTicker();
+        vpn.unregister();
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (movingPkg != null) finishMove(false);
-        if (arranging || page != PAGE_HOME) {
-            arranging = false;
+        if (page != PAGE_HOME) {
             page = PAGE_HOME;
             styleTabs();
             render(null);
@@ -345,9 +182,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (arranging) {
-            exitArrange();
-        } else if (page != PAGE_HOME) {
+        if (page != PAGE_HOME) {
             showPage(PAGE_HOME);
             if (tabHome != null) tabHome.requestFocus();
         }
@@ -362,7 +197,7 @@ public class MainActivity extends Activity {
             return true;
         }
         if (movingPkg != null && e.getAction() == KeyEvent.ACTION_DOWN) {
-            boolean inDock = dock.contains(movingPkg);
+            boolean inDock = layout.dock.contains(movingPkg);
             switch (e.getKeyCode()) {
                 case KeyEvent.KEYCODE_DPAD_LEFT: moveBy(-1); return true;
                 case KeyEvent.KEYCODE_DPAD_RIGHT: moveBy(1); return true;
@@ -378,7 +213,7 @@ public class MainActivity extends Activity {
         return super.dispatchKeyEvent(e);
     }
 
-    // ---------- Screen ----------
+    // ---------- Building the screen ----------
 
     private void buildScreen() {
         FrameLayout root = new FrameLayout(this);
@@ -415,20 +250,20 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         tabs.setClipChildren(false);
-        searchBtn = roundButton(R.drawable.ic_search, this::openSearch);
+        FrameLayout searchBtn = roundButton(R.drawable.ic_search, () -> search.open());
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(30), dp(30));
         slp.rightMargin = dp(12);
         tabs.addView(searchBtn, slp);
         tabHome = makeTab("Home", PAGE_HOME);
-        tabApps = makeTab("Apps", PAGE_APPS);
         tabDiscover = makeTab("Discover", PAGE_DISCOVER);
+        tabApps = makeTab("Apps", PAGE_APPS);
         LinearLayout.LayoutParams tlp1 = new LinearLayout.LayoutParams(WRAP, WRAP);
         tlp1.rightMargin = dp(8);
         tabs.addView(tabHome, tlp1);
         LinearLayout.LayoutParams tlp2 = new LinearLayout.LayoutParams(WRAP, WRAP);
         tlp2.rightMargin = dp(8);
-        tabs.addView(tabApps, tlp2);
-        tabs.addView(tabDiscover, new LinearLayout.LayoutParams(WRAP, WRAP));
+        tabs.addView(tabDiscover, tlp2);
+        tabs.addView(tabApps, new LinearLayout.LayoutParams(WRAP, WRAP));
         topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         weatherRow = new LinearLayout(this);
@@ -446,7 +281,7 @@ public class MainActivity extends Activity {
 
         header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
-        // Bottom left: selected item name, details line (Apps and Discover) and moving hint.
+        // Bottom left: selected item name, details line (Discover and Apps) and moving hint.
         // Fixed widths so long names fit and only very long ones get "..." at the end.
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -464,6 +299,7 @@ public class MainActivity extends Activity {
         style(hintView, 16, false, 0xFFFFD54F);
         hintView.setSingleLine(true);
         hintView.setEllipsize(TextUtils.TruncateAt.END);
+        hintView.setText("Moving: use the arrows, then OK to drop it. Back cancels.");
         hintView.setVisibility(View.GONE);
         left.addView(titleView, new LinearLayout.LayoutParams(dp(620), WRAP));
         left.addView(metaView, new LinearLayout.LayoutParams(dp(620), WRAP));
@@ -486,7 +322,7 @@ public class MainActivity extends Activity {
         vclp.rightMargin = dp(8);
         right.addView(vpnCityView, vclp);
 
-        vpnBtn = roundButton(R.drawable.ic_shield, this::openVpnApp);
+        FrameLayout vpnBtn = roundButton(R.drawable.ic_shield, () -> vpn.openApp());
         vpnDotBg = new GradientDrawable();
         vpnDotBg.setShape(GradientDrawable.OVAL);
         vpnDotBg.setColor(VPN_OFF);
@@ -495,7 +331,7 @@ public class MainActivity extends Activity {
         vpnDot.setBackground(vpnDotBg);
         vpnBtn.addView(vpnDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
 
-        cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
+        FrameLayout cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
 
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(30), dp(30));
         blp.topMargin = dp(8);
@@ -552,8 +388,8 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         styleTabs();
-        showWeatherPlaceholder();
-        applyClockZone();
+        weather.showPlaceholder();
+        weather.applyClockZone();
     }
 
     private TextView makeTab(final String label, final int target) {
@@ -565,22 +401,17 @@ public class MainActivity extends Activity {
         tv.setClickable(true);
         tv.setOnFocusChangeListener((v, f) -> {
             styleTabs();
-            if (f) {
-                // Top row: leave the big title blank
-                titleView.setText(" ");
-                metaView.setText("");
-                setGlow(NEUTRAL_GLOW);
-            }
+            if (f) topRowFocused();
         });
         tv.setOnClickListener(v -> showPage(target));
         return tv;
     }
 
     private void styleTabs() {
-        if (tabHome == null || tabApps == null || tabDiscover == null) return;
+        if (tabHome == null || tabDiscover == null || tabApps == null) return;
         styleTab(tabHome, page == PAGE_HOME);
-        styleTab(tabApps, page == PAGE_APPS);
         styleTab(tabDiscover, page == PAGE_DISCOVER);
+        styleTab(tabApps, page == PAGE_APPS);
     }
 
     private void styleTab(TextView tv, boolean active) {
@@ -593,16 +424,6 @@ public class MainActivity extends Activity {
         tv.setBackground(bg);
         tv.setTextColor(focused ? DARK : (active ? 0xFFFFFFFF : SOFT_TEXT));
         tv.setTypeface(Typeface.create("sans-serif", (active || focused) ? Typeface.BOLD : Typeface.NORMAL));
-    }
-
-    private void showPage(int target) {
-        if (page == target) return;
-        page = target;
-        arranging = false;
-        movingPkg = null;
-        styleTabs();
-        if (scroll != null) scroll.scrollTo(0, 0);
-        render(null, false);
     }
 
     private FrameLayout roundButton(int iconRes, final Runnable onClick) {
@@ -624,32 +445,26 @@ public class MainActivity extends Activity {
             bg.setColor(f ? 0xFFFFFFFF : 0x14FFFFFF);
             icon.setTint(f ? DARK : ICON_IDLE);
             v.animate().scaleX(f ? 1.15f : 1f).scaleY(f ? 1.15f : 1f).setDuration(150).start();
-            if (f) {
-                // Top row: leave the big title blank
-                titleView.setText(" ");
-                metaView.setText("");
-                setGlow(NEUTRAL_GLOW);
-            }
+            if (f) topRowFocused();
         });
         b.setOnClickListener(v -> onClick.run());
         return b;
     }
 
-    private static int[] timeOfDayColors() {
-        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        if (h >= 5 && h < 10) return new int[]{0xFF1F2B3D, 0xFF080B12};   // morning
-        if (h >= 10 && h < 17) return new int[]{0xFF1B2130, 0xFF07080C};  // day
-        if (h >= 17 && h < 21) return new int[]{0xFF2A1F33, 0xFF0A070E};  // evening
-        return new int[]{0xFF10141F, 0xFF030407};                          // night
+    /** The top row (search, tabs, VPN, cog) leaves the big title blank. */
+    private void topRowFocused() {
+        titleView.setText(" ");
+        metaView.setText("");
+        setGlow(NEUTRAL_GLOW);
     }
 
-    private void setGlow(int color) {
+    void setGlow(int color) {
         int target = (color & 0x00FFFFFF) | 0x55000000;
         if (glowAnim != null) glowAnim.cancel();
         glowAnim = ValueAnimator.ofArgb(glowColor, target);
         glowAnim.setDuration(450);
-        glowAnim.addUpdateListener(a -> {
-            glowColor = (int) a.getAnimatedValue();
+        glowAnim.addUpdateListener(an -> {
+            glowColor = (int) an.getAnimatedValue();
             glow.setColors(new int[]{glowColor, glowColor & 0x00FFFFFF});
         });
         glowAnim.start();
@@ -671,36 +486,7 @@ public class MainActivity extends Activity {
         return result;
     }
 
-    private static int dominantColor(Drawable src, int fallback) {
-        Drawable d = src.getConstantState() != null ? src.getConstantState().newDrawable().mutate() : src;
-        Bitmap b = Bitmap.createBitmap(32, 18, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(b);
-        d.setBounds(0, 0, 32, 18);
-        d.draw(c);
-        float[] hsv = new float[3];
-        float[] weight = new float[12];
-        float[][] sum = new float[12][3];
-        for (int y = 0; y < 18; y++) {
-            for (int x = 0; x < 32; x++) {
-                int p = b.getPixel(x, y);
-                if (Color.alpha(p) < 128) continue;
-                Color.colorToHSV(p, hsv);
-                if (hsv[1] < 0.35f || hsv[2] < 0.25f) continue;
-                int bucket = Math.min(11, (int) (hsv[0] / 30f));
-                float w = hsv[1] * hsv[2];
-                weight[bucket] += w;
-                sum[bucket][0] += Color.red(p) * w;
-                sum[bucket][1] += Color.green(p) * w;
-                sum[bucket][2] += Color.blue(p) * w;
-            }
-        }
-        b.recycle();
-        int best = 0;
-        for (int i = 1; i < 12; i++) if (weight[i] > weight[best]) best = i;
-        if (weight[best] < 3f) return fallback;
-        float w = weight[best];
-        return Color.rgb((int) (sum[best][0] / w), (int) (sum[best][1] / w), (int) (sum[best][2] / w));
-    }
+    // ---------- Installed apps ----------
 
     private void refreshInstalled() {
         Map<String, ResolveInfo> found = new LinkedHashMap<>();
@@ -717,7 +503,7 @@ public class MainActivity extends Activity {
         List<String> names = new ArrayList<>(found.keySet());
         final Map<String, String> labels = new HashMap<>();
         for (String p : names) labels.put(p, found.get(p).loadLabel(pm).toString());
-        Collections.sort(names, (a, b) -> labels.get(a).compareToIgnoreCase(labels.get(b)));
+        Collections.sort(names, (x, y) -> labels.get(x).compareToIgnoreCase(labels.get(y)));
 
         String sig = TextUtils.join(";", names);
         if (sig.equals(installedSignature)) return;
@@ -726,22 +512,32 @@ public class MainActivity extends Activity {
         installed.clear();
         colorByPkg.clear();
         for (String p : names) installed.put(p, found.get(p));
-        loadLayout();
+        layout.load();
         render(null, page == PAGE_HOME);
     }
 
-    private void render(String focusPkg) {
+    // ---------- Pages ----------
+
+    private void showPage(int target) {
+        if (page == target) return;
+        page = target;
+        movingPkg = null;
+        styleTabs();
+        if (scroll != null) scroll.scrollTo(0, 0);
+        render(null, false);
+    }
+
+    void saveAndRender(String focusKey) {
+        layout.save();
+        render(focusKey);
+    }
+
+    void render(String focusPkg) {
         render(focusPkg, true);
     }
 
-    private void render(String focusPkg, boolean takeFocus) {
-        handler.removeCallbacks(spotTick);
-        spotTitle = null;
-        spotBackdrop = null;
-        spotDots.clear();
-        myListSection = null;
-        myListTiles.clear();
-
+    void render(String focusPkg, boolean takeFocus) {
+        discover.clearViews();
         content.removeAllViews();
         tileByPkg.clear();
         allTiles.clear();
@@ -749,10 +545,7 @@ public class MainActivity extends Activity {
         idle = false;
         firstTile = null;
 
-        hintView.setText(movingPkg != null
-                ? "Moving: use the arrows, then OK to drop it. Back cancels."
-                : "Arrange mode: press OK on an app or folder to change it. Press Back when finished.");
-        hintView.setVisibility((arranging || movingPkg != null) ? View.VISIBLE : View.GONE);
+        hintView.setVisibility(movingPkg != null ? View.VISIBLE : View.GONE);
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
@@ -760,15 +553,12 @@ public class MainActivity extends Activity {
         if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
 
         if (page == PAGE_DISCOVER) {
-            renderDiscover();
+            discover.render();
             return;
         }
 
-        if (page == PAGE_APPS) {
-            renderApps();
-        } else {
-            renderHome();
-        }
+        if (page == PAGE_APPS) renderApps();
+        else renderHome();
 
         if (takeFocus) {
             View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
@@ -779,7 +569,7 @@ public class MainActivity extends Activity {
 
     private void renderHome() {
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
-        if (!dock.isEmpty()) {
+        if (!layout.dock.isEmpty()) {
             LinearLayout band = new LinearLayout(this);
             band.setOrientation(LinearLayout.HORIZONTAL);
             band.setGravity(Gravity.CENTER_VERTICAL);
@@ -792,10 +582,10 @@ public class MainActivity extends Activity {
             band.setBackground(bg);
 
             int avail = getResources().getConfiguration().screenWidthDp - 64 - 24;
-            int w = Math.min(DOCK_W, avail / dock.size() - 2 * DOCK_GAP);
+            int w = Math.min(DOCK_W, avail / layout.dock.size() - 2 * DOCK_GAP);
             if (w < 110) w = 110;
             int h = w * 9 / 16;
-            for (String p : dock) band.addView(appTile(p), size(w, h, DOCK_GAP));
+            for (String p : layout.dock) band.addView(appTile(p), size(w, h, DOCK_GAP));
 
             HorizontalScrollView hs = new HorizontalScrollView(this);
             hs.setHorizontalScrollBarEnabled(false);
@@ -808,12 +598,23 @@ public class MainActivity extends Activity {
         }
 
         // Sections (each can hold apps and folders)
-        addGroupSection("Watch", WATCH);
-        addGroupSection("Play", PLAY);
-        addGroupSection("Tools", TOOLS);
+        addGroupSection("Watch", Layout.WATCH);
+        addGroupSection("Play", Layout.PLAY);
+        addGroupSection("Tools", Layout.TOOLS);
     }
 
-    // ---------- Apps page ----------
+    private void addGroupSection(String title, String group) {
+        List<String> keys = layout.keysInGroup(group);
+        if (keys.isEmpty()) return;
+        addHeader(title);
+        List<View> tiles = new ArrayList<>();
+        for (String k : keys) {
+            Folder f = layout.folderForKey(k);
+            if (f != null) tiles.add(folderTile(f));
+            else if (installed.containsKey(k)) tiles.add(appTile(k));
+        }
+        addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
+    }
 
     private void renderApps() {
         addHeader("All apps (" + installed.size() + ")");
@@ -830,153 +631,21 @@ public class MainActivity extends Activity {
         addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
     }
 
-    private View appsPageTile(final String pkg) {
-        FrameLayout t = (FrameLayout) buildAppTile(pkg, () -> launch(pkg));
-
-        if (!hidden.contains(pkg)) {
-            TextView tick = new TextView(this);
-            tick.setText("\u2713");
-            style(tick, 11, true, DARK);
-            tick.setGravity(Gravity.CENTER);
-            GradientDrawable tb = new GradientDrawable();
-            tb.setShape(GradientDrawable.OVAL);
-            tb.setColor(VPN_ON);
-            tick.setBackground(tb);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.TOP | Gravity.END);
-            lp.setMargins(0, dp(5), dp(5), 0);
-            t.addView(tick, lp);
-        }
-
-        final View.OnFocusChangeListener base = t.getOnFocusChangeListener();
-        t.setOnFocusChangeListener((v, f) -> {
-            if (base != null) base.onFocusChange(v, f);
-            if (f) metaView.setText(homeStatus(pkg));
-        });
-        t.setOnLongClickListener(v -> {
-            showAppsPageMenu(pkg);
-            return true;
-        });
-        tileByPkg.put(pkg, t);
-        if (firstTile == null) firstTile = t;
-        return register(t);
-    }
-
     private String homeStatus(String pkg) {
-        if (hidden.contains(pkg)) return "Not on Home";
-        if (dock.contains(pkg)) return "On Home" + SEP + "Dock";
-        Folder f = folderOf(pkg);
-        if (f != null) return "On Home" + SEP + groupName(f.group) + SEP + f.name + " folder";
-        return "On Home" + SEP + groupName(groupOf(pkg));
+        if (!layout.isOnHome(pkg)) return "Not on Home";
+        if (layout.dock.contains(pkg)) return "On Home" + SEP + "Dock";
+        Folder f = layout.folderOf(pkg);
+        if (f != null) return "On Home" + SEP + Layout.groupName(f.group) + SEP + f.name + " folder";
+        return "On Home" + SEP + Layout.groupName(layout.groupOf(pkg));
     }
 
-    private void showAppsPageMenu(final String pkg) {
-        final boolean onHome = !hidden.contains(pkg);
-        final boolean isDock = dock.contains(pkg);
-        final List<String> opts = new ArrayList<>();
-        opts.add("Open");
-        if (!onHome) opts.add("Add to Home");
-        opts.add(isDock ? "Remove from dock" : "Add to dock");
-        if (onHome) opts.add("Remove from Home");
-        opts.add("Cancel");
-        String label = installed.get(pkg).loadLabel(pm).toString();
+    // ---------- Layout helpers ----------
 
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(label)
-                .setItems(opts.toArray(new String[0]), (d, which) -> {
-                    String o = opts.get(which);
-                    if (o.equals("Open")) {
-                        launch(pkg);
-                    } else if (o.equals("Add to Home")) {
-                        chooseHomeSpot(pkg);
-                    } else if (o.equals("Add to dock")) {
-                        addToDock(pkg);
-                    } else if (o.equals("Remove from dock")) {
-                        dock.remove(pkg);
-                        grid.add(0, pkg);
-                        saveAndRender(pkg);
-                    } else if (o.equals("Remove from Home")) {
-                        removeFromHome(pkg);
-                    }
-                })
-                .show();
-    }
-
-    private void chooseHomeSpot(final String pkg) {
-        final List<String> names = new ArrayList<>();
-        final List<Object> targets = new ArrayList<>();
-        for (String g : GROUP_ORDER) {
-            names.add(groupName(g));
-            targets.add(g);
-        }
-        for (Folder f : folders.values()) {
-            names.add(f.name + " folder   " + DOT + "   " + groupName(f.group));
-            targets.add(f);
-        }
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Add to Home")
-                .setItems(names.toArray(new String[0]), (d, which) -> {
-                    Object t = targets.get(which);
-                    hidden.remove(pkg);
-                    if (t instanceof Folder) {
-                        Folder f = (Folder) t;
-                        if (!f.apps.contains(pkg)) f.apps.add(pkg);
-                        setGroupPref(pkg, f.group);
-                        Toast.makeText(this, "Added to Home in " + f.name, Toast.LENGTH_SHORT).show();
-                    } else {
-                        String g = (String) t;
-                        setGroupPref(pkg, g);
-                        if (!grid.contains(pkg)) grid.add(pkg);
-                        Toast.makeText(this, "Added to Home in " + groupName(g), Toast.LENGTH_SHORT).show();
-                    }
-                    saveAndRender(pkg);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void addToDock(String pkg) {
-        removeFromFolder(pkg);
-        grid.remove(pkg);
-        hidden.remove(pkg);
-        if (!dock.contains(pkg)) dock.add(pkg);
-        saveAndRender(pkg);
-    }
-
-    private void removeFromHome(String pkg) {
-        removeFromFolder(pkg);
-        dock.remove(pkg);
-        grid.remove(pkg);
-        if (!hidden.contains(pkg)) hidden.add(pkg);
-        Toast.makeText(this, "Removed from Home. It's still in Apps.", Toast.LENGTH_SHORT).show();
-        saveAndRender(pkg);
-    }
-
-    // ---------- Home sections ----------
-
-    private void addGroupSection(String title, String group) {
-        List<String> keys = keysInGroup(group);
-        if (keys.isEmpty()) return;
-        addHeader(title);
-        List<View> tiles = new ArrayList<>();
-        for (String k : keys) {
-            Folder f = folderForKey(k);
-            if (f != null) tiles.add(folderTile(f));
-            else if (installed.containsKey(k)) tiles.add(appTile(k));
-        }
-        addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
-    }
-
-    private List<String> keysInGroup(String group) {
-        List<String> out = new ArrayList<>();
-        for (String k : grid) if (groupOf(k).equals(group)) out.add(k);
-        return out;
-    }
-
-    private void addHeader(String text) {
+    void addHeader(String text) {
         addHeaderTo(content, text);
     }
 
-    private void addHeaderTo(LinearLayout parent, String text) {
+    void addHeaderTo(LinearLayout parent, String text) {
         TextView h = new TextView(this);
         style(h, 18, true, 0xA0FFFFFF);
         h.setText(text);
@@ -1002,16 +671,24 @@ public class MainActivity extends Activity {
         }
     }
 
-    private View register(View t) {
+    /** Tiles are registered so they can dim when the screen is idle. */
+    View register(View t) {
         allTiles.add(t);
         baseAlpha.put(t, 1f);
         return t;
     }
 
+    void unregister(View t) {
+        allTiles.remove(t);
+        baseAlpha.remove(t);
+    }
+
+    // ---------- Tiles ----------
+
     private View appTile(final String pkg) {
-        View t = buildAppTile(pkg, () -> onAppClicked(pkg));
+        View t = buildAppTile(pkg, () -> launch(pkg));
         t.setOnLongClickListener(v -> {
-            showAppMenu(pkg, !arranging);
+            menus.appMenu(pkg);
             return true;
         });
         tileByPkg.put(pkg, t);
@@ -1019,7 +696,38 @@ public class MainActivity extends Activity {
         return register(t);
     }
 
-    private View buildAppTile(String pkg, Runnable onClick) {
+    private View appsPageTile(final String pkg) {
+        FrameLayout t = (FrameLayout) buildAppTile(pkg, () -> launch(pkg));
+
+        if (layout.isOnHome(pkg)) {
+            TextView tick = new TextView(this);
+            tick.setText("\u2713");
+            style(tick, 11, true, DARK);
+            tick.setGravity(Gravity.CENTER);
+            GradientDrawable tb = new GradientDrawable();
+            tb.setShape(GradientDrawable.OVAL);
+            tb.setColor(VPN_ON);
+            tick.setBackground(tb);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.TOP | Gravity.END);
+            lp.setMargins(0, dp(5), dp(5), 0);
+            t.addView(tick, lp);
+        }
+
+        final View.OnFocusChangeListener base = t.getOnFocusChangeListener();
+        t.setOnFocusChangeListener((v, f) -> {
+            if (base != null) base.onFocusChange(v, f);
+            if (f) metaView.setText(homeStatus(pkg));
+        });
+        t.setOnLongClickListener(v -> {
+            menus.appsPageMenu(pkg);
+            return true;
+        });
+        tileByPkg.put(pkg, t);
+        if (firstTile == null) firstTile = t;
+        return register(t);
+    }
+
+    View buildAppTile(String pkg, Runnable onClick) {
         ResolveInfo ri = installed.get(pkg);
         String label = ri.loadLabel(pm).toString();
         Drawable banner = ri.activityInfo.loadBanner(pm);
@@ -1028,9 +736,8 @@ public class MainActivity extends Activity {
     }
 
     private View folderTile(final Folder f) {
-        final String key = FOLDER_PREFIX + f.id;
-        FrameLayout t = (FrameLayout) tile(f.name, null, null, key.equals(movingPkg), null,
-                () -> onFolderClicked(f));
+        final String key = Layout.keyOf(f);
+        FrameLayout t = (FrameLayout) tile(f.name, null, null, key.equals(movingPkg), null, () -> openFolder(f));
         t.removeAllViews();
 
         LinearLayout col = new LinearLayout(this);
@@ -1069,7 +776,7 @@ public class MainActivity extends Activity {
 
         t.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
         t.setOnLongClickListener(v -> {
-            showFolderMenu(f, !arranging);
+            menus.folderMenu(f);
             return true;
         });
         tileByPkg.put(key, t);
@@ -1077,12 +784,7 @@ public class MainActivity extends Activity {
         return register(t);
     }
 
-    private void onFolderClicked(Folder f) {
-        if (arranging) showFolderMenu(f, true);
-        else openFolder(f);
-    }
-
-    private void openFolder(final Folder f) {
+    void openFolder(final Folder f) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(8), dp(12), dp(8), dp(12));
@@ -1098,11 +800,11 @@ public class MainActivity extends Activity {
             if (!installed.containsKey(p)) continue;
             View t = buildAppTile(p, () -> {
                 if (holder[0] != null) holder[0].dismiss();
-                onAppClicked(p);
+                launch(p);
             });
             t.setOnLongClickListener(v -> {
                 if (holder[0] != null) holder[0].dismiss();
-                showAppMenu(p, !arranging);
+                menus.appMenu(p);
                 return true;
             });
             views.add(t);
@@ -1110,7 +812,7 @@ public class MainActivity extends Activity {
         addRows(box, views, FOLDER_COLUMNS, FOLDER_W, FOLDER_H, GRID_GAP);
 
         holder[0] = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(arranging ? f.name + ": press OK on an app to change it" : f.name)
+                .setTitle(f.name)
                 .setView(sv)
                 .setNegativeButton("Close", null)
                 .create();
@@ -1174,1154 +876,7 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    // ---------- Search ----------
-
-    private void openSearch() {
-        final Dialog d = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar_Fullscreen);
-
-        FrameLayout root = new FrameLayout(this);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, timeOfDayColors()));
-
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(48), dp(32), dp(48), dp(20));
-        root.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
-
-        TextView heading = new TextView(this);
-        style(heading, 16, true, SOFT_TEXT);
-        heading.setText("Search");
-        heading.setPadding(dp(8), 0, 0, dp(10));
-        col.addView(heading, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        final EditText field = new EditText(this);
-        field.setSingleLine(true);
-        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        field.setTextColor(0xFFFFFFFF);
-        field.setHintTextColor(0x80FFFFFF);
-        field.setHint("Search your apps, films and series");
-        field.setInputType(InputType.TYPE_CLASS_TEXT);
-        field.setImeOptions(EditorInfo.IME_ACTION_SEARCH
-                | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
-        final GradientDrawable fieldBg = new GradientDrawable();
-        fieldBg.setCornerRadius(dp(28));
-        fieldBg.setColor(0x1FFFFFFF);
-        field.setBackground(fieldBg);
-        field.setPadding(dp(22), dp(14), dp(22), dp(14));
-        Drawable icon = getDrawable(R.drawable.ic_search).mutate();
-        icon.setTint(ICON_IDLE);
-        icon.setBounds(0, 0, dp(22), dp(22));
-        field.setCompoundDrawables(icon, null, null, null);
-        field.setCompoundDrawablePadding(dp(14));
-        field.setOnFocusChangeListener((v, f) -> fieldBg.setStroke(f ? dp(2) : 0, 0xFFFFFFFF));
-        col.addView(field, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        ScrollView sv = new ScrollView(this);
-        sv.setVerticalScrollBarEnabled(false);
-        sv.setVerticalFadingEdgeEnabled(true);
-        sv.setFadingEdgeLength(dp(24));
-        final LinearLayout results = new LinearLayout(this);
-        results.setOrientation(LinearLayout.VERTICAL);
-        results.setClipChildren(false);
-        results.setClipToPadding(false);
-        results.setPadding(0, dp(4), 0, dp(40));
-        sv.addView(results, new FrameLayout.LayoutParams(MATCH, WRAP));
-        col.addView(sv, new LinearLayout.LayoutParams(MATCH, 0, 1f));
-
-        final boolean hasTmdb = BuildConfig.TMDB_TOKEN != null && !BuildConfig.TMDB_TOKEN.isEmpty();
-        final Runnable[] pending = new Runnable[1];
-        final int[] generation = {0};
-
-        field.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                final String q = s.toString().trim();
-                if (pending[0] != null) handler.removeCallbacks(pending[0]);
-                final int gen = ++generation[0];
-                boolean searchFilms = hasTmdb && q.length() >= 2;
-                renderSearch(results, field, d, q, null, searchFilms);
-                if (!searchFilms) return;
-                pending[0] = () -> new Thread(() -> {
-                    final List<Item> found = new ArrayList<>();
-                    try {
-                        JSONArray res = new JSONObject(tmdbGet("/search/multi?language=en-US&include_adult=false&page=1&query="
-                                + URLEncoder.encode(q, "UTF-8"))).getJSONArray("results");
-                        for (int i = 0; i < res.length() && found.size() < 20; i++) {
-                            Item it = parseItem(res.getJSONObject(i), null);
-                            if (it != null) found.add(it);
-                        }
-                    } catch (Exception ignored) {
-                    }
-                    runOnUiThread(() -> {
-                        if (gen == generation[0] && d.isShowing()) renderSearch(results, field, d, q, found, true);
-                    });
-                }).start();
-                handler.postDelayed(pending[0], 450);
-            }
-        });
-
-        field.setOnEditorActionListener((v, actionId, ev) -> {
-            String q = field.getText().toString().trim();
-            if (!q.isEmpty()) saveRecentSearch(q);
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
-            results.requestFocus();
-            return true;
-        });
-
-        renderSearch(results, field, d, "", null, false);
-
-        d.setContentView(root);
-        if (d.getWindow() != null) {
-            d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
-                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
-        }
-        d.setOnDismissListener(di -> {
-            if (pending[0] != null) handler.removeCallbacks(pending[0]);
-            generation[0]++;
-        });
-        d.show();
-        field.requestFocus();
-    }
-
-    private void renderSearch(final LinearLayout results, final EditText field, final Dialog d,
-                              final String q, final List<Item> films, final boolean searchFilms) {
-        results.removeAllViews();
-
-        if (q.isEmpty()) {
-            List<String> recent = loadRecentSearches();
-            if (recent.isEmpty()) {
-                searchNote(results, "Type to search your apps and every film and series.");
-                return;
-            }
-            addHeaderTo(results, "Recent searches");
-            LinearLayout pills = new LinearLayout(this);
-            pills.setOrientation(LinearLayout.HORIZONTAL);
-            pills.setPadding(dp(12), dp(6), dp(12), dp(6));
-            pills.setClipChildren(false);
-            for (final String term : recent) {
-                TextView p = pillButton(term, () -> {
-                    field.setText(term);
-                    field.setSelection(term.length());
-                }, null);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-                lp.rightMargin = dp(10);
-                pills.addView(p, lp);
-            }
-            HorizontalScrollView hs = new HorizontalScrollView(this);
-            hs.setHorizontalScrollBarEnabled(false);
-            hs.setClipChildren(false);
-            hs.setClipToPadding(false);
-            hs.addView(pills, new FrameLayout.LayoutParams(WRAP, WRAP));
-            results.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
-            return;
-        }
-
-        // Apps
-        String lower = q.toLowerCase(Locale.UK);
-        List<String> apps = new ArrayList<>();
-        for (Map.Entry<String, ResolveInfo> e : installed.entrySet()) {
-            String label = e.getValue().loadLabel(pm).toString().toLowerCase(Locale.UK);
-            if (label.contains(lower)) apps.add(e.getKey());
-            if (apps.size() >= 10) break;
-        }
-        if (!apps.isEmpty()) {
-            addHeaderTo(results, "Apps");
-            LinearLayout band = new LinearLayout(this);
-            band.setOrientation(LinearLayout.HORIZONTAL);
-            band.setPadding(dp(12), dp(4), dp(12), dp(4));
-            band.setClipChildren(false);
-            band.setClipToPadding(false);
-            for (final String pkg : apps) {
-                band.addView(buildAppTile(pkg, () -> {
-                    saveRecentSearch(q);
-                    d.dismiss();
-                    launch(pkg);
-                }), size(GRID_W, GRID_H, GRID_GAP));
-            }
-            HorizontalScrollView hs = new HorizontalScrollView(this);
-            hs.setHorizontalScrollBarEnabled(false);
-            hs.setClipChildren(false);
-            hs.setClipToPadding(false);
-            hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
-            results.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
-        }
-
-        // Films and series
-        if (searchFilms) {
-            if (films == null) {
-                searchNote(results, "Searching films and series\u2026");
-            } else if (films.isEmpty()) {
-                searchNote(results, apps.isEmpty() ? "No results for \"" + q + "\"." : "No films or series found.");
-            } else {
-                addHeaderTo(results, "Films and series");
-                LinearLayout band = new LinearLayout(this);
-                band.setOrientation(LinearLayout.HORIZONTAL);
-                band.setPadding(dp(12), dp(4), dp(12), dp(4));
-                band.setClipChildren(false);
-                band.setClipToPadding(false);
-                for (final Item it : films) {
-                    band.addView(buildPoster(it, POSTER_W, POSTER_H, false, () -> {
-                        saveRecentSearch(q);
-                        openInfo(it);
-                    }), size(POSTER_W, POSTER_H, 8));
-                }
-                HorizontalScrollView hs = new HorizontalScrollView(this);
-                hs.setHorizontalScrollBarEnabled(false);
-                hs.setClipChildren(false);
-                hs.setClipToPadding(false);
-                hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
-                results.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
-            }
-        } else if (apps.isEmpty()) {
-            searchNote(results, "No apps match \"" + q + "\".");
-        }
-    }
-
-    private void searchNote(LinearLayout parent, String text) {
-        TextView t = new TextView(this);
-        style(t, 16, false, SOFT_TEXT);
-        t.setText(text);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.topMargin = dp(24);
-        lp.leftMargin = dp(12);
-        parent.addView(t, lp);
-    }
-
-    private List<String> loadRecentSearches() {
-        List<String> out = new ArrayList<>();
-        try {
-            JSONArray a = new JSONArray(prefs.getString("recent_searches", "[]"));
-            for (int i = 0; i < a.length(); i++) out.add(a.getString(i));
-        } catch (Exception ignored) {
-        }
-        return out;
-    }
-
-    private void saveRecentSearch(String q) {
-        List<String> list = loadRecentSearches();
-        for (int i = list.size() - 1; i >= 0; i--) {
-            if (list.get(i).equalsIgnoreCase(q)) list.remove(i);
-        }
-        list.add(0, q);
-        while (list.size() > 6) list.remove(list.size() - 1);
-        JSONArray a = new JSONArray();
-        for (String s : list) a.put(s);
-        prefs.edit().putString("recent_searches", a.toString()).apply();
-    }
-
-    // ---------- Discover (data from TMDB) ----------
-
-    private void renderDiscover() {
-        if (BuildConfig.TMDB_TOKEN == null || BuildConfig.TMDB_TOKEN.isEmpty()) {
-            discoverMessage("Discover needs a TMDB key",
-                    "Add the TMDB_TOKEN secret on GitHub, then build again.");
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        boolean stale = discoverRows == null || now - discoverAt > DISCOVER_REFRESH_MS;
-        if (stale && !discoverLoading && now - discoverTriedAt > 30 * 1000L) loadDiscover();
-
-        if (discoverRows == null) {
-            if (discoverError && !discoverLoading) {
-                discoverMessage("Couldn't load Discover",
-                        "Check the internet connection, then open Discover again in a moment.");
-            } else {
-                discoverMessage("Finding something good to watch\u2026", "");
-            }
-            return;
-        }
-
-        if (!discoverSpot.isEmpty()) buildSpotlight();
-
-        myListSection = new LinearLayout(this);
-        myListSection.setOrientation(LinearLayout.VERTICAL);
-        myListSection.setClipChildren(false);
-        myListSection.setClipToPadding(false);
-        content.addView(myListSection, new LinearLayout.LayoutParams(MATCH, WRAP));
-        refreshMyListRow();
-
-        for (Row r : discoverRows) {
-            if (r.items.isEmpty()) continue;
-            addHeader(r.title);
-            posterRow(content, r.items, null);
-        }
-
-        TextView credit = new TextView(this);
-        style(credit, 12, false, 0x80FFFFFF);
-        credit.setText("This product uses the TMDB API but is not endorsed or certified by TMDB.");
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        clp.topMargin = dp(28);
-        clp.leftMargin = dp(12);
-        content.addView(credit, clp);
-    }
-
-    private void discoverMessage(String head, String body) {
-        TextView a = new TextView(this);
-        style(a, 26, true, 0xFFFFFFFF);
-        a.setText(head);
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        alp.topMargin = dp(40);
-        alp.leftMargin = dp(12);
-        content.addView(a, alp);
-        if (!body.isEmpty()) {
-            TextView b = new TextView(this);
-            style(b, 16, false, SOFT_TEXT);
-            b.setText(body);
-            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(WRAP, WRAP);
-            blp.topMargin = dp(10);
-            blp.leftMargin = dp(12);
-            content.addView(b, blp);
-        }
-    }
-
-    private void loadDiscover() {
-        discoverLoading = true;
-        discoverError = false;
-        discoverTriedAt = System.currentTimeMillis();
-        new Thread(() -> {
-            final List<Item> spot = new ArrayList<>();
-            final List<Row> rows = new ArrayList<>();
-            boolean ok = true;
-            try {
-                Set<String> seen = new HashSet<>();
-
-                JSONArray trending = new JSONObject(tmdbGet("/trending/all/week?language=en-US"))
-                        .getJSONArray("results");
-                Row trendRow = new Row();
-                trendRow.title = "Trending this week";
-                for (int i = 0; i < trending.length(); i++) {
-                    Item it = parseItem(trending.getJSONObject(i), null);
-                    if (it == null || seen.contains(it.key())) continue;
-                    if (spot.size() < SPOT_COUNT && !it.backdrop.isEmpty() && !it.overview.isEmpty()) {
-                        spot.add(it);
-                        seen.add(it.key());
-                    } else if (trendRow.items.size() < ROW_MAX) {
-                        trendRow.items.add(it);
-                        seen.add(it.key());
-                    }
-                }
-                rows.add(trendRow);
-
-                rows.add(fetchRow("New and highly rated",
-                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=300"
-                                + "&primary_release_date.gte=" + dateOffset(-15) + "&primary_release_date.lte=" + dateOffset(0),
-                        "movie", seen, null));
-
-                rows.add(fetchRow("Binge-worthy series",
-                        "/discover/tv?language=en-US&sort_by=popularity.desc&vote_average.gte=8&vote_count.gte=500",
-                        "tv", seen, null));
-
-                String[] mood = moodForToday();
-                rows.add(fetchRow("Tonight's mood: " + mood[1],
-                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=500"
-                                + "&with_genres=" + mood[0],
-                        "movie", seen, null));
-
-                rows.add(fetchRow("Coming soon", "/movie/upcoming?language=en-US", "movie", seen, dateOffset(0)));
-            } catch (Exception e) {
-                ok = false;
-            }
-            final boolean success = ok;
-            if (success) {
-                for (Item it : spot) prefetch(TMDB_IMG + "w780" + it.backdrop);
-            }
-            runOnUiThread(() -> {
-                discoverLoading = false;
-                if (success) {
-                    discoverSpot = spot;
-                    discoverRows = rows;
-                    discoverAt = System.currentTimeMillis();
-                    spotIndex = 0;
-                } else {
-                    discoverError = true;
-                }
-                if (page == PAGE_DISCOVER) render(null, false);
-            });
-        }).start();
-    }
-
-    private Row fetchRow(String title, String path, String type, Set<String> seen, String minDate) throws Exception {
-        JSONArray res = new JSONObject(tmdbGet(path)).getJSONArray("results");
-        Row row = new Row();
-        row.title = title;
-        for (int i = 0; i < res.length() && row.items.size() < ROW_MAX; i++) {
-            Item it = parseItem(res.getJSONObject(i), type);
-            if (it == null || seen.contains(it.key())) continue;
-            if (minDate != null && (it.date.isEmpty() || it.date.compareTo(minDate) < 0)) continue;
-            row.items.add(it);
-            seen.add(it.key());
-        }
-        return row;
-    }
-
-    private static Item parseItem(JSONObject j, String forcedType) {
-        String type = forcedType != null ? forcedType : str(j, "media_type");
-        if (!type.equals("movie") && !type.equals("tv")) return null;
-        String poster = str(j, "poster_path");
-        if (poster.isEmpty()) return null;
-        Item it = new Item();
-        it.id = j.optInt("id", 0);
-        if (it.id == 0) return null;
-        it.type = type;
-        it.title = type.equals("movie") ? str(j, "title") : str(j, "name");
-        it.poster = poster;
-        it.backdrop = str(j, "backdrop_path");
-        it.overview = str(j, "overview");
-        it.rating = j.optDouble("vote_average", 0);
-        it.date = type.equals("movie") ? str(j, "release_date") : str(j, "first_air_date");
-        it.year = it.date.length() >= 4 ? it.date.substring(0, 4) : "";
-        return it;
-    }
-
-    private static String dateOffset(int months) {
-        Calendar c = Calendar.getInstance();
-        c.add(Calendar.MONTH, months);
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(c.getTime());
-    }
-
-    private static String[] moodForToday() {
-        switch (Calendar.getInstance().get(Calendar.DAY_OF_WEEK)) {
-            case Calendar.MONDAY: return new String[]{"35", "Comedy"};
-            case Calendar.TUESDAY: return new String[]{"53", "Thriller"};
-            case Calendar.WEDNESDAY: return new String[]{"878", "Sci-fi"};
-            case Calendar.THURSDAY: return new String[]{"80", "Crime"};
-            case Calendar.FRIDAY: return new String[]{"28", "Action"};
-            case Calendar.SATURDAY: return new String[]{"10751", "Family"};
-            default: return new String[]{"18", "Drama"};
-        }
-    }
-
-    private static String str(JSONObject j, String key) {
-        if (j == null || !j.has(key) || j.isNull(key)) return "";
-        return j.optString(key, "");
-    }
-
-    private static String tmdbGet(String path) throws Exception {
-        return httpGet(TMDB_API + path, BuildConfig.TMDB_TOKEN);
-    }
-
-    private String meta(Item it) {
-        List<String> parts = new ArrayList<>();
-        if (it.rating > 0) parts.add(STAR + " " + String.format(Locale.UK, "%.1f", it.rating));
-        if (!it.year.isEmpty()) parts.add(it.year);
-        parts.add(it.type.equals("movie") ? "Film" : "Series");
-        return TextUtils.join(SEP, parts);
-    }
-
-    // Spotlight
-
-    private void buildSpotlight() {
-        FrameLayout box = new FrameLayout(this);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(18));
-        bg.setColor(SPOT_BG);
-        box.setBackground(bg);
-        box.setClipToOutline(true);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(MATCH, dp(240));
-        blp.setMargins(dp(12), dp(6), dp(12), dp(6));
-        content.addView(box, blp);
-
-        spotBackdrop = new ImageView(this);
-        spotBackdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        box.addView(spotBackdrop, new FrameLayout.LayoutParams(dp(560), MATCH, Gravity.END));
-
-        View shadeLeft = new View(this);
-        shadeLeft.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{SPOT_BG, 0xB30E1118, 0x000E1118}));
-        box.addView(shadeLeft, new FrameLayout.LayoutParams(dp(560), MATCH, Gravity.END));
-
-        View shadeBottom = new View(this);
-        shadeBottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x000E1118, SPOT_BG}));
-        box.addView(shadeBottom, new FrameLayout.LayoutParams(MATCH, dp(70), Gravity.BOTTOM));
-
-        // Text column: fixed width so the description stays on the left, clear of the picture
-        LinearLayout text = new LinearLayout(this);
-        text.setOrientation(LinearLayout.VERTICAL);
-        text.setPadding(dp(26), dp(20), dp(26), dp(20));
-        text.setClipChildren(false);
-        text.setClipToPadding(false);
-
-        TextView label = new TextView(this);
-        style(label, 13, true, 0xFFC9A8F0);
-        label.setText("Tonight's pick");
-        text.addView(label, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        spotTitle = new TextView(this);
-        style(spotTitle, 30, true, 0xFFFFFFFF);
-        spotTitle.setSingleLine(true);
-        spotTitle.setEllipsize(TextUtils.TruncateAt.END);
-        spotTitle.setPadding(0, dp(2), 0, 0);
-        text.addView(spotTitle, new LinearLayout.LayoutParams(dp(470), WRAP));
-
-        spotMeta = new TextView(this);
-        style(spotMeta, 15, false, SOFT_TEXT);
-        spotMeta.setSingleLine(true);
-        spotMeta.setPadding(0, dp(2), 0, 0);
-        text.addView(spotMeta, new LinearLayout.LayoutParams(dp(470), WRAP));
-
-        spotDesc = new TextView(this);
-        style(spotDesc, 15, false, 0xFFE6E8EE);
-        spotDesc.setMaxLines(2);
-        spotDesc.setEllipsize(TextUtils.TruncateAt.END);
-        spotDesc.setLineSpacing(0, 1.15f);
-        spotDesc.setPadding(0, dp(8), 0, 0);
-        text.addView(spotDesc, new LinearLayout.LayoutParams(dp(430), WRAP));
-
-        text.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
-
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setClipChildren(false);
-        spotTrailer = pillButton("\u25B6  Trailer", () -> playTrailerFor(currentSpot()), this::onSpotFocus);
-        spotList = pillButton("+  My list", () -> {
-            toggleMyList(currentSpot());
-            updateSpotListButton();
-        }, this::onSpotFocus);
-        spotSurprise = pillButton("Surprise me", this::surpriseMe, this::onSpotFocus);
-        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bl.rightMargin = dp(10);
-        buttons.addView(spotTrailer, bl);
-        LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bl2.rightMargin = dp(10);
-        buttons.addView(spotList, bl2);
-        buttons.addView(spotSurprise, new LinearLayout.LayoutParams(WRAP, WRAP));
-        text.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        box.addView(text, new FrameLayout.LayoutParams(MATCH, MATCH));
-
-        LinearLayout dots = new LinearLayout(this);
-        dots.setOrientation(LinearLayout.HORIZONTAL);
-        spotDots.clear();
-        for (int i = 0; i < discoverSpot.size(); i++) {
-            View dv = new View(this);
-            GradientDrawable dbg = new GradientDrawable();
-            dbg.setCornerRadius(dp(2));
-            dbg.setColor(0x59FFFFFF);
-            dv.setBackground(dbg);
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(6), dp(4));
-            dlp.leftMargin = dp(5);
-            dots.addView(dv, dlp);
-            spotDots.add(dv);
-        }
-        FrameLayout.LayoutParams dotsLp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.END);
-        dotsLp.setMargins(0, 0, dp(24), dp(22));
-        box.addView(dots, dotsLp);
-
-        showSpot(spotIndex, false);
-        handler.removeCallbacks(spotTick);
-        handler.postDelayed(spotTick, SPOT_EVERY_MS);
-    }
-
-    private Item currentSpot() {
-        if (discoverSpot.isEmpty()) return null;
-        return discoverSpot.get(Math.max(0, Math.min(spotIndex, discoverSpot.size() - 1)));
-    }
-
-    private boolean spotlightFocused() {
-        return (spotTrailer != null && spotTrailer.isFocused())
-                || (spotList != null && spotList.isFocused())
-                || (spotSurprise != null && spotSurprise.isFocused());
-    }
-
-    private void showSpot(int i, boolean animate) {
-        if (discoverSpot.isEmpty() || spotTitle == null) return;
-        int n = discoverSpot.size();
-        spotIndex = ((i % n) + n) % n;
-        final Item it = discoverSpot.get(spotIndex);
-        spotTitle.setText(it.title);
-        spotMeta.setText(meta(it));
-        spotDesc.setText(it.overview);
-        updateSpotListButton();
-
-        for (int k = 0; k < spotDots.size(); k++) {
-            View dv = spotDots.get(k);
-            boolean active = k == spotIndex;
-            ((GradientDrawable) dv.getBackground()).setColor(active ? 0xFFFFFFFF : 0x59FFFFFF);
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) dv.getLayoutParams();
-            lp.width = dp(active ? 18 : 6);
-            dv.setLayoutParams(lp);
-        }
-
-        final String url = TMDB_IMG + "w780" + it.backdrop;
-        final ImageView target = spotBackdrop;
-        if (animate && target != null) {
-            target.animate().alpha(0f).setDuration(250).withEndAction(() -> {
-                loadImage(url, target);
-                target.animate().alpha(1f).setDuration(450).start();
-            }).start();
-        } else if (target != null) {
-            loadImage(url, target);
-        }
-        if (spotlightFocused()) onSpotFocus();
-    }
-
-    private void onSpotFocus() {
-        Item it = currentSpot();
-        if (it == null) return;
-        titleView.setText(it.title);
-        metaView.setText(meta(it));
-        Drawable dr = spotBackdrop != null ? spotBackdrop.getDrawable() : null;
-        setGlow(dr != null ? dominantColor(dr, NEUTRAL_GLOW) : NEUTRAL_GLOW);
-    }
-
-    private void updateSpotListButton() {
-        Item it = currentSpot();
-        if (spotList == null || it == null) return;
-        spotList.setText(isInMyList(it) ? "\u2713  In My list" : "+  My list");
-    }
-
-    // Surprise me
-
-    private void surpriseMe() {
-        Toast.makeText(this, "Finding something good\u2026", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            Item pick = null;
-            try {
-                Random r = new Random();
-                String type = r.nextBoolean() ? "movie" : "tv";
-                String base = "/discover/" + type + "?language=en-US&sort_by=popularity.desc"
-                        + "&vote_average.gte=7.5&vote_count.gte=1000&page=";
-                JSONArray res = new JSONObject(tmdbGet(base + (1 + r.nextInt(10)))).getJSONArray("results");
-                if (res.length() == 0) res = new JSONObject(tmdbGet(base + 1)).getJSONArray("results");
-                List<Item> options = new ArrayList<>();
-                for (int i = 0; i < res.length(); i++) {
-                    Item it = parseItem(res.getJSONObject(i), type);
-                    if (it != null) options.add(it);
-                }
-                if (!options.isEmpty()) pick = options.get(r.nextInt(options.size()));
-            } catch (Exception ignored) {
-            }
-            final Item chosen = pick;
-            runOnUiThread(() -> {
-                if (chosen != null) openInfo(chosen);
-                else Toast.makeText(this, "Couldn't find a pick right now. Try again in a moment.",
-                        Toast.LENGTH_LONG).show();
-            });
-        }).start();
-    }
-
-    // My list
-
-    private List<Item> loadMyList() {
-        List<Item> out = new ArrayList<>();
-        try {
-            JSONArray a = new JSONArray(prefs.getString("mylist", "[]"));
-            for (int i = 0; i < a.length(); i++) {
-                JSONObject o = a.getJSONObject(i);
-                Item it = new Item();
-                it.id = o.optInt("id", 0);
-                it.type = str(o, "type");
-                it.title = str(o, "title");
-                it.poster = str(o, "poster");
-                it.backdrop = str(o, "backdrop");
-                it.overview = str(o, "overview");
-                it.date = str(o, "date");
-                it.rating = o.optDouble("rating", 0);
-                it.year = str(o, "year");
-                if (it.id != 0 && !it.poster.isEmpty()) out.add(it);
-            }
-        } catch (Exception ignored) {
-        }
-        return out;
-    }
-
-    private void saveMyList(List<Item> list) {
-        JSONArray a = new JSONArray();
-        try {
-            for (Item it : list) {
-                JSONObject o = new JSONObject();
-                o.put("id", it.id);
-                o.put("type", it.type);
-                o.put("title", it.title);
-                o.put("poster", it.poster);
-                o.put("backdrop", it.backdrop);
-                o.put("overview", it.overview);
-                o.put("date", it.date);
-                o.put("rating", it.rating);
-                o.put("year", it.year);
-                a.put(o);
-            }
-        } catch (Exception ignored) {
-        }
-        prefs.edit().putString("mylist", a.toString()).apply();
-    }
-
-    private boolean isInMyList(Item it) {
-        if (it == null) return false;
-        for (Item m : loadMyList()) if (m.key().equals(it.key())) return true;
-        return false;
-    }
-
-    private boolean toggleMyList(Item it) {
-        if (it == null) return false;
-        List<Item> list = loadMyList();
-        boolean removed = false;
-        for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).key().equals(it.key())) {
-                list.remove(i);
-                removed = true;
-                break;
-            }
-        }
-        if (!removed) list.add(0, it);
-        saveMyList(list);
-        refreshMyListRow();
-        Toast.makeText(this, removed ? "Removed from My list" : "Added to My list", Toast.LENGTH_SHORT).show();
-        return !removed;
-    }
-
-    private void refreshMyListRow() {
-        if (myListSection == null) return;
-        for (View v : myListTiles) {
-            allTiles.remove(v);
-            baseAlpha.remove(v);
-        }
-        myListTiles.clear();
-        myListSection.removeAllViews();
-        List<Item> list = loadMyList();
-        if (list.isEmpty()) return;
-        addHeaderTo(myListSection, "My list");
-        posterRow(myListSection, list, myListTiles);
-    }
-
-    // Posters
-
-    private void posterRow(LinearLayout parent, List<Item> items, List<View> track) {
-        LinearLayout band = new LinearLayout(this);
-        band.setOrientation(LinearLayout.HORIZONTAL);
-        band.setPadding(dp(12), dp(4), dp(12), dp(4));
-        band.setClipChildren(false);
-        band.setClipToPadding(false);
-        for (final Item it : items) {
-            View p = register(buildPoster(it, POSTER_W, POSTER_H, true, () -> openInfo(it)));
-            if (track != null) track.add(p);
-            band.addView(p, size(POSTER_W, POSTER_H, 8));
-        }
-        HorizontalScrollView hs = new HorizontalScrollView(this);
-        hs.setHorizontalScrollBarEnabled(false);
-        hs.setClipChildren(false);
-        hs.setClipToPadding(false);
-        hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
-        parent.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
-    }
-
-    private View buildPoster(final Item it, int w, int h, final boolean updateHeader, final Runnable onClick) {
-        FrameLayout t = new FrameLayout(this);
-        t.setFocusable(true);
-        t.setClickable(true);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        bg.setColor(0xFF2B3140);
-        t.setBackground(bg);
-        t.setClipToOutline(true);
-
-        final ImageView iv = new ImageView(this);
-        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        t.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
-        loadImage(TMDB_IMG + "w185" + it.poster, iv);
-
-        final GradientDrawable ring = new GradientDrawable();
-        ring.setCornerRadius(dp(10));
-        ring.setStroke(dp(3), 0xFFFFFFFF);
-        ring.setColor(0x00000000);
-
-        t.setOnFocusChangeListener((v, f) -> {
-            v.animate().scaleX(f ? 1.1f : 1f).scaleY(f ? 1.1f : 1f)
-                    .translationZ(f ? dp(10) : 0).setDuration(150).start();
-            ((FrameLayout) v).setForeground(f ? ring : null);
-            if (f && updateHeader) {
-                titleView.setText(it.title);
-                metaView.setText(meta(it));
-                Drawable dr = iv.getDrawable();
-                setGlow(dr != null ? dominantColor(dr, NEUTRAL_GLOW) : NEUTRAL_GLOW);
-            }
-        });
-        t.setOnClickListener(v -> onClick.run());
-        t.setOnLongClickListener(v -> {
-            showPosterMenu(it);
-            return true;
-        });
-        return t;
-    }
-
-    private void showPosterMenu(final Item it) {
-        final boolean inList = isInMyList(it);
-        String[] opts = {"More info", "\u25B6  Trailer",
-                inList ? "Remove from My list" : "+  Add to My list", "Cancel"};
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(it.title)
-                .setItems(opts, (d, which) -> {
-                    if (which == 0) {
-                        openInfo(it);
-                    } else if (which == 1) {
-                        playTrailerFor(it);
-                    } else if (which == 2) {
-                        toggleMyList(it);
-                        updateSpotListButton();
-                    }
-                })
-                .show();
-    }
-
-    private Bitmap fetchBitmap(String url) {
-        try {
-            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(15000);
-            BitmapFactory.Options o = new BitmapFactory.Options();
-            o.inPreferredConfig = Bitmap.Config.RGB_565;
-            try (InputStream in = c.getInputStream()) {
-                return BitmapFactory.decodeStream(in, null, o);
-            } finally {
-                c.disconnect();
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private void prefetch(final String url) {
-        if (imageCache.get(url) != null) return;
-        imagePool.execute(() -> {
-            Bitmap b = fetchBitmap(url);
-            if (b != null) imageCache.put(url, b);
-        });
-    }
-
-    private void loadImage(final String url, final ImageView into) {
-        into.setTag(url);
-        Bitmap cached = imageCache.get(url);
-        if (cached != null) {
-            into.setImageBitmap(cached);
-            return;
-        }
-        into.setImageDrawable(null);
-        imagePool.execute(() -> {
-            Bitmap b = fetchBitmap(url);
-            if (b == null) return;
-            imageCache.put(url, b);
-            runOnUiThread(() -> {
-                if (url.equals(into.getTag())) into.setImageBitmap(b);
-            });
-        });
-    }
-
-    // Info card
-
-    private void openInfo(final Item it) {
-        if (it == null) return;
-        final Dialog dialog = new Dialog(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
-
-        FrameLayout root = new FrameLayout(this);
-        GradientDrawable rootBg = new GradientDrawable();
-        rootBg.setCornerRadius(dp(18));
-        rootBg.setColor(0xFF0F131C);
-        root.setBackground(rootBg);
-        root.setClipToOutline(true);
-
-        ImageView backdrop = new ImageView(this);
-        backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        root.addView(backdrop, new FrameLayout.LayoutParams(MATCH, MATCH));
-        if (!it.backdrop.isEmpty()) loadImage(TMDB_IMG + "w780" + it.backdrop, backdrop);
-
-        View shade = new View(this);
-        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xF20B0E14, 0xD90B0E14, 0xA60B0E14}));
-        root.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
-
-        LinearLayout outer = new LinearLayout(this);
-        outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setPadding(dp(26), dp(24), dp(26), dp(16));
-        outer.setClipChildren(false);
-        outer.setClipToPadding(false);
-        root.addView(outer, new FrameLayout.LayoutParams(MATCH, MATCH));
-
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setClipChildren(false);
-        outer.addView(top, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        ImageView poster = new ImageView(this);
-        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        GradientDrawable pbg = new GradientDrawable();
-        pbg.setCornerRadius(dp(10));
-        pbg.setColor(0xFF2B3140);
-        poster.setBackground(pbg);
-        poster.setClipToOutline(true);
-        loadImage(TMDB_IMG + "w342" + it.poster, poster);
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(140), dp(210));
-        plp.rightMargin = dp(24);
-        top.addView(poster, plp);
-
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        info.setClipChildren(false);
-        top.addView(info, new LinearLayout.LayoutParams(0, dp(210), 1f));
-
-        TextView title = new TextView(this);
-        style(title, 26, true, 0xFFFFFFFF);
-        title.setText(it.title);
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        info.addView(title, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        final TextView metaLine = new TextView(this);
-        style(metaLine, 15, false, SOFT_TEXT);
-        metaLine.setText(meta(it));
-        metaLine.setPadding(0, dp(4), 0, 0);
-        info.addView(metaLine, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        final TextView genres = new TextView(this);
-        style(genres, 14, false, SOFT_TEXT);
-        genres.setPadding(0, dp(2), 0, 0);
-        info.addView(genres, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        final TextView overview = new TextView(this);
-        style(overview, 15, false, 0xFFFFFFFF);
-        overview.setText(it.overview.isEmpty() ? "Loading details\u2026" : it.overview);
-        overview.setMaxLines(4);
-        overview.setEllipsize(TextUtils.TruncateAt.END);
-        overview.setLineSpacing(0, 1.15f);
-        overview.setPadding(0, dp(10), 0, 0);
-        info.addView(overview, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        final TextView cast = new TextView(this);
-        style(cast, 13, false, SOFT_TEXT);
-        cast.setPadding(0, dp(8), 0, 0);
-        cast.setSingleLine(true);
-        cast.setEllipsize(TextUtils.TruncateAt.END);
-        info.addView(cast, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        info.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
-
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setClipChildren(false);
-        final String[] trailerKey = new String[1];
-        final TextView trailerBtn = pillButton("Finding trailer\u2026", () -> {
-            if (trailerKey[0] != null) {
-                dialog.dismiss();
-                playTrailer(trailerKey[0]);
-            }
-        }, null);
-        final TextView[] listBtnHolder = new TextView[1];
-        listBtnHolder[0] = pillButton(isInMyList(it) ? "\u2713  In My list" : "+  My list", () -> {
-            boolean nowIn = toggleMyList(it);
-            listBtnHolder[0].setText(nowIn ? "\u2713  In My list" : "+  My list");
-            updateSpotListButton();
-        }, null);
-        TextView closeBtn = pillButton("Close", dialog::dismiss, null);
-        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bl.rightMargin = dp(10);
-        buttons.addView(trailerBtn, bl);
-        LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bl2.rightMargin = dp(10);
-        buttons.addView(listBtnHolder[0], bl2);
-        buttons.addView(closeBtn, new LinearLayout.LayoutParams(WRAP, WRAP));
-        info.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        final TextView moreHeader = new TextView(this);
-        style(moreHeader, 15, true, 0xA0FFFFFF);
-        moreHeader.setText("More like this");
-        moreHeader.setVisibility(View.GONE);
-        moreHeader.setPadding(0, dp(16), 0, dp(2));
-        outer.addView(moreHeader, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        final LinearLayout moreBand = new LinearLayout(this);
-        moreBand.setOrientation(LinearLayout.HORIZONTAL);
-        moreBand.setPadding(0, dp(4), dp(8), dp(4));
-        moreBand.setClipChildren(false);
-        moreBand.setClipToPadding(false);
-        HorizontalScrollView moreScroll = new HorizontalScrollView(this);
-        moreScroll.setHorizontalScrollBarEnabled(false);
-        moreScroll.setClipChildren(false);
-        moreScroll.setClipToPadding(false);
-        moreScroll.addView(moreBand, new FrameLayout.LayoutParams(WRAP, WRAP));
-        outer.addView(moreScroll, new LinearLayout.LayoutParams(MATCH, WRAP));
-
-        dialog.setContentView(root);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(0x00000000));
-        }
-        dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(dp(800), dp(470));
-        trailerBtn.requestFocus();
-
-        new Thread(() -> {
-            try {
-                String extra = it.type.equals("movie") ? "release_dates" : "content_ratings";
-                JSONObject d = new JSONObject(tmdbGet("/" + it.type + "/" + it.id
-                        + "?language=en-US&append_to_response=videos,credits,recommendations," + extra));
-
-                List<String> g = new ArrayList<>();
-                JSONArray ga = d.optJSONArray("genres");
-                if (ga != null) for (int i = 0; i < ga.length() && i < 3; i++) g.add(str(ga.getJSONObject(i), "name"));
-
-                String length = "";
-                if (it.type.equals("movie")) {
-                    int mins = d.optInt("runtime", 0);
-                    if (mins > 0) length = (mins / 60) + "h " + (mins % 60) + "m";
-                } else {
-                    int seasons = d.optInt("number_of_seasons", 0);
-                    if (seasons > 0) length = seasons + (seasons == 1 ? " season" : " seasons");
-                }
-
-                String ov = str(d, "overview");
-
-                List<String> names = new ArrayList<>();
-                JSONObject credits = d.optJSONObject("credits");
-                JSONArray ca = credits != null ? credits.optJSONArray("cast") : null;
-                if (ca != null) for (int i = 0; i < ca.length() && i < 3; i++) names.add(str(ca.getJSONObject(i), "name"));
-
-                JSONObject videos = d.optJSONObject("videos");
-                String key = pickTrailer(videos != null ? videos.optJSONArray("results") : null);
-
-                String age = ageRating(d, it.type);
-
-                final List<Item> recs = new ArrayList<>();
-                JSONObject rec = d.optJSONObject("recommendations");
-                JSONArray ra = rec != null ? rec.optJSONArray("results") : null;
-                if (ra != null) {
-                    for (int i = 0; i < ra.length() && recs.size() < 10; i++) {
-                        JSONObject rj = ra.getJSONObject(i);
-                        String rt = str(rj, "media_type");
-                        Item ri = parseItem(rj, rt.isEmpty() ? it.type : rt);
-                        if (ri != null) recs.add(ri);
-                    }
-                }
-
-                final String genreText = TextUtils.join(", ", g)
-                        + (length.isEmpty() ? "" : (g.isEmpty() ? "" : SEP) + length);
-                final String overviewText = ov.isEmpty()
-                        ? (it.overview.isEmpty() ? "No description available." : it.overview) : ov;
-                final String castText = names.isEmpty() ? "" : "Starring " + TextUtils.join(", ", names);
-                final String metaText = meta(it) + (age.isEmpty() ? "" : SEP + age);
-                final String foundKey = key;
-                if (key != null) trailerCache.put(it.key(), key);
-
-                runOnUiThread(() -> {
-                    metaLine.setText(metaText);
-                    genres.setText(genreText);
-                    overview.setText(overviewText);
-                    cast.setText(castText);
-                    trailerKey[0] = foundKey;
-                    trailerBtn.setText(foundKey != null ? "\u25B6  Trailer" : "No trailer available");
-                    if (!recs.isEmpty()) {
-                        moreHeader.setVisibility(View.VISIBLE);
-                        for (final Item r : recs) {
-                            View p = buildPoster(r, 64, 96, false, () -> {
-                                dialog.dismiss();
-                                openInfo(r);
-                            });
-                            moreBand.addView(p, size(64, 96, 6));
-                        }
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    overview.setText(it.overview.isEmpty()
-                            ? "Couldn't load details. Check the internet connection." : it.overview);
-                    trailerBtn.setText("No trailer available");
-                });
-            }
-        }).start();
-    }
-
-    private static String pickTrailer(JSONArray va) {
-        if (va == null) return null;
-        try {
-            for (int pass = 0; pass < 2; pass++) {
-                for (int i = 0; i < va.length(); i++) {
-                    JSONObject v = va.getJSONObject(i);
-                    if (!"YouTube".equals(str(v, "site"))) continue;
-                    String vt = str(v, "type");
-                    boolean good = pass == 0 ? "Trailer".equals(vt) : ("Teaser".equals(vt) || "Trailer".equals(vt));
-                    if (good) {
-                        String k = str(v, "key");
-                        if (!k.isEmpty()) return k;
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    private static String ageRating(JSONObject d, String type) {
-        try {
-            String us = "";
-            if (type.equals("movie")) {
-                JSONObject rd = d.optJSONObject("release_dates");
-                JSONArray arr = rd != null ? rd.optJSONArray("results") : null;
-                if (arr == null) return "";
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject c = arr.getJSONObject(i);
-                    String country = str(c, "iso_3166_1");
-                    JSONArray dates = c.optJSONArray("release_dates");
-                    if (dates == null) continue;
-                    for (int k = 0; k < dates.length(); k++) {
-                        String cert = str(dates.getJSONObject(k), "certification");
-                        if (cert.isEmpty()) continue;
-                        if ("GB".equals(country)) return cert;
-                        if ("US".equals(country) && us.isEmpty()) us = cert;
-                    }
-                }
-            } else {
-                JSONObject cr = d.optJSONObject("content_ratings");
-                JSONArray arr = cr != null ? cr.optJSONArray("results") : null;
-                if (arr == null) return "";
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject c = arr.getJSONObject(i);
-                    String country = str(c, "iso_3166_1");
-                    String rating = str(c, "rating");
-                    if (rating.isEmpty()) continue;
-                    if ("GB".equals(country)) return rating;
-                    if ("US".equals(country) && us.isEmpty()) us = rating;
-                }
-            }
-            return us;
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private void playTrailerFor(final Item it) {
-        if (it == null) return;
-        String cached = trailerCache.get(it.key());
-        if (cached != null) {
-            playTrailer(cached);
-            return;
-        }
-        new Thread(() -> {
-            String key = null;
-            try {
-                JSONObject d = new JSONObject(tmdbGet("/" + it.type + "/" + it.id + "/videos?language=en-US"));
-                key = pickTrailer(d.optJSONArray("results"));
-            } catch (Exception ignored) {
-            }
-            final String k = key;
-            runOnUiThread(() -> {
-                if (k != null) {
-                    trailerCache.put(it.key(), k);
-                    playTrailer(k);
-                } else {
-                    Toast.makeText(this, "No trailer available for this one.", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }).start();
-    }
-
-    private TextView pillButton(String label, final Runnable onClick, final Runnable onFocus) {
+    TextView pillButton(String label, final Runnable onClick, final Runnable onFocus) {
         final TextView b = new TextView(this);
         b.setText(label);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -2343,16 +898,30 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private void playTrailer(String key) {
-        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=" + key));
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        i.setPackage(YOUTUBE_APP);
-        try {
-            startActivity(i);
-        } catch (Exception e) {
-            i.setPackage(null);
-            startSafe(i);
+    // ---------- Moving apps and folders ----------
+
+    void startMove(String key) {
+        movingPkg = key;
+        backupDock = new ArrayList<>(layout.dock);
+        backupGrid = new ArrayList<>(layout.grid);
+        render(key);
+    }
+
+    private void finishMove(boolean keep) {
+        if (!keep) {
+            layout.dock.clear();
+            layout.dock.addAll(backupDock);
+            layout.grid.clear();
+            layout.grid.addAll(backupGrid);
         }
+        String p = movingPkg;
+        movingPkg = null;
+        if (keep) layout.save();
+        render(p);
+    }
+
+    private void moveBy(int delta) {
+        if (layout.moveBy(movingPkg, delta)) render(movingPkg);
     }
 
     // ---------- Idle dimming ----------
@@ -2364,7 +933,7 @@ public class MainActivity extends Activity {
     }
 
     private void goIdle() {
-        if (arranging || movingPkg != null || !hasWindowFocus()) return;
+        if (movingPkg != null || !hasWindowFocus()) return;
         idle = true;
         View f = getCurrentFocus();
         for (View t : allTiles) {
@@ -2377,8 +946,8 @@ public class MainActivity extends Activity {
         idle = false;
         View f = getCurrentFocus();
         for (View t : allTiles) {
-            Float a = baseAlpha.get(t);
-            t.animate().alpha(a == null ? 1f : a).setDuration(200).start();
+            Float al = baseAlpha.get(t);
+            t.animate().alpha(al == null ? 1f : al).setDuration(200).start();
         }
         if (f != null && allTiles.contains(f)) f.animate().scaleX(1.12f).scaleY(1.12f).setDuration(200).start();
     }
@@ -2393,804 +962,3 @@ public class MainActivity extends Activity {
                     if (which == 0) {
                         startSafe(new Intent(Settings.ACTION_SETTINGS));
                     } else if (which == 1) {
-                        askClockZone();
-                    } else if (which == 2) {
-                        askWeatherPlace();
-                    }
-                })
-                .show();
-    }
-
-    // ---------- Clock time zone (display only, the Shield's own time is unchanged) ----------
-
-    private void applyClockZone() {
-        String tz = prefs.getString("clock_tz", null);
-        if (timeClock != null) timeClock.setTimeZone(tz);
-        if (dateClock != null) dateClock.setTimeZone(tz);
-        if (clockPlaceView != null) {
-            if (tz != null) {
-                clockPlaceView.setText(prefs.getString("clock_name", ""));
-                clockPlaceView.setVisibility(View.VISIBLE);
-            } else {
-                clockPlaceView.setVisibility(View.GONE);
-            }
-        }
-    }
-
-    private void askClockZone() {
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        input.setSingleLine(true);
-        input.setHint("Town or city");
-        FrameLayout box = new FrameLayout(this);
-        box.setPadding(dp(24), dp(8), dp(24), 0);
-        box.addView(input);
-
-        String current = prefs.getString("clock_name", null);
-        String msg = "Showing: " + (prefs.contains("clock_tz") && current != null ? current : "Shield's time")
-                + "\n\nThis changes the clock on this screen only. The Shield's own time stays the same.";
-
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Clock time zone")
-                .setMessage(msg)
-                .setView(box)
-                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), true))
-                .setNeutralButton("Use Shield's time", (d, w) -> {
-                    prefs.edit().remove("clock_tz").remove("clock_name").apply();
-                    applyClockZone();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    // ---------- VPN status (location by ipwho.is) ----------
-
-    private void openVpnApp() {
-        Intent i = pm.getLeanbackLaunchIntentForPackage(VPN_APP);
-        if (i == null) i = pm.getLaunchIntentForPackage(VPN_APP);
-        if (i != null) startSafe(i);
-        else Toast.makeText(this, "Surfshark isn't installed.", Toast.LENGTH_LONG).show();
-    }
-
-    private void registerNet() {
-        if (netCallback != null || cm == null) return;
-        netCallback = new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(Network n) {
-                handler.postDelayed(() -> updateVpn(true), 2000);
-            }
-
-            @Override
-            public void onLost(Network n) {
-                handler.postDelayed(() -> updateVpn(true), 2000);
-            }
-
-            @Override
-            public void onCapabilitiesChanged(Network n, NetworkCapabilities c) {
-                handler.postDelayed(() -> updateVpn(false), 2000);
-            }
-        };
-        try {
-            cm.registerDefaultNetworkCallback(netCallback);
-        } catch (Exception e) {
-            netCallback = null;
-        }
-    }
-
-    private void unregisterNet() {
-        if (netCallback == null || cm == null) return;
-        try {
-            cm.unregisterNetworkCallback(netCallback);
-        } catch (Exception ignored) {
-        }
-        netCallback = null;
-    }
-
-    private boolean isVpnOn() {
-        if (cm == null) return false;
-        try {
-            for (Network n : cm.getAllNetworks()) {
-                NetworkCapabilities c = cm.getNetworkCapabilities(n);
-                if (c != null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
-    }
-
-    private void updateVpn(boolean force) {
-        final boolean on = isVpnOn();
-        boolean changed = lastVpnState == null || lastVpnState != on;
-        lastVpnState = on;
-        if (changed) {
-            lastWhere = null;
-            showVpn(on, null);
-        }
-        long now = System.currentTimeMillis();
-        if (!(changed || force || now - lastIpFetch > VPN_EVERY_MS)) return;
-        lastIpFetch = now;
-        new Thread(() -> {
-            String where = null;
-            try {
-                JSONObject o = new JSONObject(httpGet("https://ipwho.is/", null));
-                if (o.optBoolean("success", false)) {
-                    String city = str(o, "city");
-                    where = city.isEmpty() ? str(o, "country") : city;
-                }
-            } catch (Exception ignored) {
-            }
-            final String w = where;
-            runOnUiThread(() -> showVpn(on, w));
-        }).start();
-    }
-
-    private void showVpn(boolean on, String where) {
-        if (where != null && !where.isEmpty()) lastWhere = where;
-        if (vpnDotBg != null) vpnDotBg.setColor(on ? VPN_ON : VPN_OFF);
-        if (vpnCityView != null) {
-            if (on && lastWhere != null) {
-                vpnCityView.setText(lastWhere);
-                vpnCityView.setVisibility(View.VISIBLE);
-            } else {
-                vpnCityView.setVisibility(View.GONE);
-            }
-        }
-    }
-
-    // ---------- Groups ----------
-
-    private String groupOf(String key) {
-        Folder f = folderForKey(key);
-        if (f != null) return f.group;
-        if (isFolderKey(key)) return TOOLS;
-        String saved = prefs.getString("group_" + key, null);
-        return saved != null ? saved : defaultGroup(key);
-    }
-
-    private String defaultGroup(String pkg) {
-        if (PLAY_PKGS.contains(pkg)) return PLAY;
-        if (TOOLS_PKGS.contains(pkg)) return TOOLS;
-        ResolveInfo ri = installed.get(pkg);
-        int cat = ri != null ? ri.activityInfo.applicationInfo.category : ApplicationInfo.CATEGORY_UNDEFINED;
-        if (cat == ApplicationInfo.CATEGORY_GAME) return PLAY;
-        if (cat == ApplicationInfo.CATEGORY_VIDEO || cat == ApplicationInfo.CATEGORY_AUDIO
-                || cat == ApplicationInfo.CATEGORY_NEWS || cat == ApplicationInfo.CATEGORY_UNDEFINED) {
-            return WATCH;
-        }
-        return TOOLS;
-    }
-
-    private static String groupName(String g) {
-        if (PLAY.equals(g)) return "Play";
-        if (TOOLS.equals(g)) return "Tools";
-        return "Watch";
-    }
-
-    private void setGroupPref(String pkg, String g) {
-        prefs.edit().putString("group_" + pkg, g).apply();
-    }
-
-    private void setGroup(String key, String g) {
-        Folder f = folderForKey(key);
-        if (f != null) {
-            f.group = g;
-            for (String p : f.apps) setGroupPref(p, g);
-        } else {
-            setGroupPref(key, g);
-        }
-    }
-
-    private void chooseGroup(final String key) {
-        String current = groupOf(key);
-        final List<String> options = new ArrayList<>();
-        final List<String> names = new ArrayList<>();
-        for (String g : GROUP_ORDER) {
-            if (!g.equals(current)) {
-                options.add(g);
-                names.add(groupName(g));
-            }
-        }
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Move to group")
-                .setItems(names.toArray(new String[0]), (d, which) -> {
-                    setGroup(key, options.get(which));
-                    saveAndRender(key);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    // ---------- Folders ----------
-
-    private static boolean isFolderKey(String k) {
-        return k != null && k.startsWith(FOLDER_PREFIX);
-    }
-
-    private Folder folderForKey(String k) {
-        return isFolderKey(k) ? folders.get(k.substring(FOLDER_PREFIX.length())) : null;
-    }
-
-    private Folder folderOf(String pkg) {
-        for (Folder f : folders.values()) if (f.apps.contains(pkg)) return f;
-        return null;
-    }
-
-    private void loadFolders() {
-        folders.clear();
-        try {
-            JSONArray a = new JSONArray(prefs.getString("folders", "[]"));
-            for (int i = 0; i < a.length(); i++) {
-                JSONObject o = a.getJSONObject(i);
-                Folder f = new Folder();
-                f.id = str(o, "id");
-                f.name = str(o, "name");
-                f.group = str(o, "group");
-                if (!Arrays.asList(GROUP_ORDER).contains(f.group)) f.group = TOOLS;
-                if (f.name.isEmpty()) f.name = "Folder";
-                JSONArray apps = o.optJSONArray("apps");
-                if (apps != null) for (int k = 0; k < apps.length(); k++) f.apps.add(apps.getString(k));
-                if (!f.id.isEmpty()) folders.put(f.id, f);
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void saveFolders() {
-        JSONArray a = new JSONArray();
-        try {
-            for (Folder f : folders.values()) {
-                JSONObject o = new JSONObject();
-                o.put("id", f.id);
-                o.put("name", f.name);
-                o.put("group", f.group);
-                JSONArray apps = new JSONArray();
-                for (String p : f.apps) apps.put(p);
-                o.put("apps", apps);
-                a.put(o);
-            }
-        } catch (Exception ignored) {
-        }
-        prefs.edit().putString("folders", a.toString()).apply();
-    }
-
-    private void dropEmptyFolders() {
-        List<String> empty = new ArrayList<>();
-        for (Folder f : folders.values()) if (f.apps.isEmpty()) empty.add(f.id);
-        for (String id : empty) {
-            folders.remove(id);
-            grid.remove(FOLDER_PREFIX + id);
-        }
-    }
-
-    private void showFolderMenu(final Folder f, boolean includeOpen) {
-        final String key = FOLDER_PREFIX + f.id;
-        final List<String> opts = new ArrayList<>();
-        if (includeOpen) opts.add("Open");
-        opts.add("Move");
-        opts.add("Rename");
-        opts.add("Move to group");
-        opts.add("Remove folder (keeps the apps)");
-        opts.add("Cancel");
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(f.name)
-                .setItems(opts.toArray(new String[0]), (d, which) -> {
-                    String o = opts.get(which);
-                    if (o.equals("Open")) {
-                        openFolder(f);
-                    } else if (o.equals("Move")) {
-                        startMove(key);
-                    } else if (o.equals("Rename")) {
-                        askFolderName("Rename folder", f.name, name -> {
-                            f.name = name;
-                            saveAndRender(key);
-                        });
-                    } else if (o.equals("Move to group")) {
-                        chooseGroup(key);
-                    } else if (o.startsWith("Remove folder")) {
-                        removeFolder(f);
-                    }
-                })
-                .show();
-    }
-
-    private void askFolderName(String title, String current, final Consumer<String> done) {
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        input.setSingleLine(true);
-        input.setHint("Folder name");
-        input.setText(current);
-        input.setSelection(input.getText().length());
-        FrameLayout box = new FrameLayout(this);
-        box.setPadding(dp(24), dp(8), dp(24), 0);
-        box.addView(input);
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(title)
-                .setView(box)
-                .setPositiveButton("OK", (d, w) -> {
-                    String name = input.getText().toString().trim();
-                    done.accept(name.isEmpty() ? "Folder" : name);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void chooseFolder(final String pkg) {
-        final Folder current = folderOf(pkg);
-        final List<Folder> options = new ArrayList<>();
-        final List<String> names = new ArrayList<>();
-        names.add("+  New folder");
-        for (Folder f : folders.values()) {
-            if (f == current) continue;
-            options.add(f);
-            names.add(f.name + "   " + DOT + "   " + groupName(f.group));
-        }
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(current == null ? "Add to folder" : "Move to another folder")
-                .setItems(names.toArray(new String[0]), (d, which) -> {
-                    if (which == 0) {
-                        askFolderName("New folder", "", name -> createFolderWith(pkg, name));
-                    } else {
-                        putInFolder(pkg, options.get(which - 1));
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void createFolderWith(String pkg, String name) {
-        Folder cur = folderOf(pkg);
-        Folder f = new Folder();
-        f.id = "f" + System.currentTimeMillis();
-        f.name = name;
-        f.group = cur != null ? cur.group : groupOf(pkg);
-        int idx;
-        if (cur != null) {
-            cur.apps.remove(pkg);
-            idx = grid.indexOf(FOLDER_PREFIX + cur.id) + 1;
-        } else {
-            idx = grid.indexOf(pkg);
-            grid.remove(pkg);
-        }
-        if (idx < 0 || idx > grid.size()) idx = grid.size();
-        String key = FOLDER_PREFIX + f.id;
-        grid.add(idx, key);
-        f.apps.add(pkg);
-        folders.put(f.id, f);
-        setGroupPref(pkg, f.group);
-        saveAndRender(key);
-    }
-
-    private void putInFolder(String pkg, Folder f) {
-        Folder cur = folderOf(pkg);
-        if (cur != null) cur.apps.remove(pkg);
-        grid.remove(pkg);
-        if (!f.apps.contains(pkg)) f.apps.add(pkg);
-        setGroupPref(pkg, f.group);
-        Toast.makeText(this, "Added to " + f.name, Toast.LENGTH_SHORT).show();
-        saveAndRender(FOLDER_PREFIX + f.id);
-    }
-
-    private void takeOutOfFolder(String pkg) {
-        Folder f = folderOf(pkg);
-        if (f == null) return;
-        f.apps.remove(pkg);
-        setGroupPref(pkg, f.group);
-        int idx = grid.indexOf(FOLDER_PREFIX + f.id);
-        grid.add(idx < 0 ? grid.size() : idx + 1, pkg);
-    }
-
-    private void removeFromFolder(String pkg) {
-        Folder f = folderOf(pkg);
-        if (f != null) f.apps.remove(pkg);
-    }
-
-    private void removeFolder(Folder f) {
-        String key = FOLDER_PREFIX + f.id;
-        int idx = grid.indexOf(key);
-        if (idx < 0) idx = grid.size();
-        grid.remove(key);
-        String first = null;
-        for (String p : f.apps) {
-            setGroupPref(p, f.group);
-            grid.add(Math.min(idx, grid.size()), p);
-            idx++;
-            if (first == null) first = p;
-        }
-        folders.remove(f.id);
-        saveAndRender(first);
-    }
-
-    // ---------- Layout ----------
-
-    private void loadLayout() {
-        dock.clear();
-        grid.clear();
-        hidden.clear();
-        String savedDock = prefs.getString("dock", null);
-        List<String> d = savedDock == null ? Arrays.asList(DEFAULT_DOCK) : split(savedDock);
-        for (String p : d) if (installed.containsKey(p) && !dock.contains(p)) dock.add(p);
-        for (String p : split(prefs.getString("hidden", ""))) {
-            if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p)) hidden.add(p);
-        }
-
-        // Folders keep only installed apps that aren't docked, off Home or already in another folder
-        loadFolders();
-        Set<String> inFolder = new HashSet<>();
-        for (Folder f : folders.values()) {
-            List<String> keep = new ArrayList<>();
-            for (String p : f.apps) {
-                if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p)) {
-                    keep.add(p);
-                    inFolder.add(p);
-                }
-            }
-            f.apps.clear();
-            f.apps.addAll(keep);
-        }
-
-        // First time with folders: put the rarely used tools into a "More tools" folder
-        if (!prefs.getBoolean("folders_init", false)) {
-            Folder f = new Folder();
-            f.id = "f" + System.currentTimeMillis();
-            f.name = "More tools";
-            f.group = TOOLS;
-            for (String p : DEFAULT_FOLDER_PKGS) {
-                if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p)) {
-                    f.apps.add(p);
-                    inFolder.add(p);
-                }
-            }
-            if (!f.apps.isEmpty()) folders.put(f.id, f);
-            prefs.edit().putBoolean("folders_init", true).apply();
-        }
-
-        for (String k : split(prefs.getString("order", ""))) {
-            if (grid.contains(k)) continue;
-            if (isFolderKey(k)) {
-                Folder f = folderForKey(k);
-                if (f != null && !f.apps.isEmpty()) grid.add(k);
-            } else if (installed.containsKey(k) && !dock.contains(k) && !hidden.contains(k) && !inFolder.contains(k)) {
-                grid.add(k);
-            }
-        }
-        for (Folder f : folders.values()) {
-            String k = FOLDER_PREFIX + f.id;
-            if (!f.apps.isEmpty() && !grid.contains(k)) grid.add(k);
-        }
-        // Anything not placed yet (including newly installed apps) goes onto Home in its usual section
-        for (String p : installed.keySet()) {
-            if (!dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p) && !grid.contains(p)) grid.add(p);
-        }
-        saveLayout();
-    }
-
-    private void saveLayout() {
-        dropEmptyFolders();
-        prefs.edit()
-                .putString("dock", TextUtils.join(",", dock))
-                .putString("order", TextUtils.join(",", grid))
-                .putString("hidden", TextUtils.join(",", hidden))
-                .apply();
-        saveFolders();
-    }
-
-    private void saveAndRender(String focusKey) {
-        saveLayout();
-        render(focusKey);
-    }
-
-    private void onAppClicked(String pkg) {
-        if (arranging) showAppMenu(pkg, false);
-        else launch(pkg);
-    }
-
-    private void exitArrange() {
-        arranging = false;
-        movingPkg = null;
-        render(null);
-    }
-
-    private void showAppMenu(final String pkg, boolean includeOpen) {
-        final boolean isDock = dock.contains(pkg);
-        final Folder inFolder = folderOf(pkg);
-        final List<String> opts = new ArrayList<>();
-        if (includeOpen) opts.add("Open");
-        if (inFolder == null) opts.add("Move");
-        if (!isDock && inFolder == null) opts.add("Move to group");
-        if (!isDock) opts.add(inFolder == null ? "Add to folder" : "Move to another folder");
-        if (inFolder != null) opts.add("Take out of folder");
-        opts.add(isDock ? "Remove from dock" : "Add to dock");
-        opts.add("Remove from Home");
-        opts.add("Cancel");
-        String label = installed.get(pkg).loadLabel(pm).toString();
-
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(label)
-                .setItems(opts.toArray(new String[0]), (d, which) -> {
-                    String o = opts.get(which);
-                    if (o.equals("Open")) {
-                        launch(pkg);
-                    } else if (o.equals("Move")) {
-                        startMove(pkg);
-                    } else if (o.equals("Move to group")) {
-                        chooseGroup(pkg);
-                    } else if (o.equals("Add to folder") || o.equals("Move to another folder")) {
-                        chooseFolder(pkg);
-                    } else if (o.equals("Take out of folder")) {
-                        takeOutOfFolder(pkg);
-                        saveAndRender(pkg);
-                    } else if (o.equals("Add to dock")) {
-                        addToDock(pkg);
-                    } else if (o.equals("Remove from dock")) {
-                        dock.remove(pkg);
-                        grid.add(0, pkg);
-                        saveAndRender(pkg);
-                    } else if (o.equals("Remove from Home")) {
-                        removeFromHome(pkg);
-                    }
-                })
-                .show();
-    }
-
-    private void startMove(String key) {
-        movingPkg = key;
-        backupDock = new ArrayList<>(dock);
-        backupGrid = new ArrayList<>(grid);
-        render(key);
-    }
-
-    private void finishMove(boolean keep) {
-        if (!keep) {
-            dock.clear();
-            dock.addAll(backupDock);
-            grid.clear();
-            grid.addAll(backupGrid);
-        }
-        String p = movingPkg;
-        movingPkg = null;
-        if (keep) saveLayout();
-        render(p);
-    }
-
-    private void moveBy(int delta) {
-        if (dock.contains(movingPkg)) {
-            int i = dock.indexOf(movingPkg);
-            int j = i + delta;
-            if (i < 0 || j < 0 || j >= dock.size()) return;
-            dock.remove(i);
-            dock.add(j, movingPkg);
-            render(movingPkg);
-            return;
-        }
-        String g = groupOf(movingPkg);
-        List<String> sub = keysInGroup(g);
-        int i = sub.indexOf(movingPkg);
-        int j = i + delta;
-        if (i < 0 || j < 0 || j >= sub.size()) return;
-        sub.remove(i);
-        sub.add(j, movingPkg);
-
-        List<String> rebuilt = new ArrayList<>();
-        for (String grp : GROUP_ORDER) {
-            if (grp.equals(g)) rebuilt.addAll(sub);
-            else rebuilt.addAll(keysInGroup(grp));
-        }
-        grid.clear();
-        grid.addAll(rebuilt);
-        render(movingPkg);
-    }
-
-    private static List<String> split(String s) {
-        List<String> out = new ArrayList<>();
-        if (s == null) return out;
-        for (String p : s.split(",")) {
-            if (!p.trim().isEmpty()) out.add(p.trim());
-        }
-        return out;
-    }
-
-    // ---------- Weather (data by Open-Meteo.com) ----------
-
-    private void showWeatherPlaceholder() {
-        weatherView.setText("");
-        if (prefs.contains("wx_lat")) {
-            placeView.setText(prefs.getString("wx_name", ""));
-        } else {
-            placeView.setText("Set weather in Settings");
-        }
-    }
-
-    private void askWeatherPlace() {
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        input.setSingleLine(true);
-        input.setHint("Town or city");
-        FrameLayout box = new FrameLayout(this);
-        box.setPadding(dp(24), dp(8), dp(24), 0);
-        box.addView(input);
-
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Weather location")
-                .setMessage("Weather data by Open-Meteo.com")
-                .setView(box)
-                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), false))
-                .setNeutralButton("Remove weather", (d, w) -> {
-                    prefs.edit().remove("wx_lat").remove("wx_lon").remove("wx_name").apply();
-                    lastWeatherFetch = 0;
-                    showWeatherPlaceholder();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    // Looks up a place by name. Used for both the weather location and the clock time zone.
-    private void searchPlace(final String q, final boolean forClock) {
-        if (q.isEmpty()) return;
-        new Thread(() -> {
-            try {
-                String url = "https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name="
-                        + URLEncoder.encode(q, "UTF-8");
-                JSONObject o = new JSONObject(httpGet(url, null));
-                JSONArray res = o.optJSONArray("results");
-                final List<String> names = new ArrayList<>();
-                final List<String> shortNames = new ArrayList<>();
-                final List<double[]> coords = new ArrayList<>();
-                final List<String> zones = new ArrayList<>();
-                if (res != null) {
-                    for (int i = 0; i < res.length(); i++) {
-                        JSONObject r = res.getJSONObject(i);
-                        String name = str(r, "name");
-                        String admin = str(r, "admin1");
-                        String country = str(r, "country");
-                        StringBuilder sb = new StringBuilder(name);
-                        if (!admin.isEmpty()) sb.append(", ").append(admin);
-                        if (!country.isEmpty()) sb.append(", ").append(country);
-                        names.add(sb.toString());
-                        shortNames.add(name);
-                        coords.add(new double[]{r.getDouble("latitude"), r.getDouble("longitude")});
-                        zones.add(str(r, "timezone"));
-                    }
-                }
-                runOnUiThread(() -> {
-                    if (names.isEmpty()) {
-                        Toast.makeText(this, "No places found. Try another spelling.", Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                            .setTitle("Which one?")
-                            .setItems(names.toArray(new String[0]), (d, w) -> {
-                                if (forClock) {
-                                    String tz = zones.get(w);
-                                    if (tz.isEmpty()) {
-                                        Toast.makeText(this, "Couldn't find a time zone for that place.",
-                                                Toast.LENGTH_LONG).show();
-                                        return;
-                                    }
-                                    prefs.edit()
-                                            .putString("clock_tz", tz)
-                                            .putString("clock_name", shortNames.get(w))
-                                            .apply();
-                                    applyClockZone();
-                                } else {
-                                    prefs.edit()
-                                            .putFloat("wx_lat", (float) coords.get(w)[0])
-                                            .putFloat("wx_lon", (float) coords.get(w)[1])
-                                            .putString("wx_name", shortNames.get(w))
-                                            .apply();
-                                    showWeatherPlaceholder();
-                                    fetchWeather();
-                                }
-                            })
-                            .setNegativeButton("Cancel", null)
-                            .show();
-                });
-            } catch (Exception ex) {
-                runOnUiThread(() -> Toast.makeText(this,
-                        "Couldn't search right now. Check the internet connection.", Toast.LENGTH_LONG).show());
-            }
-        }).start();
-    }
-
-    private void fetchWeather() {
-        if (!prefs.contains("wx_lat")) {
-            showWeatherPlaceholder();
-            return;
-        }
-        final float lat = prefs.getFloat("wx_lat", 0f);
-        final float lon = prefs.getFloat("wx_lon", 0f);
-        lastWeatherFetch = System.currentTimeMillis();
-        new Thread(() -> {
-            try {
-                String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
-                        + "&current=temperature_2m,weather_code"
-                        + "&timezone=auto&forecast_days=1";
-                JSONObject o = new JSONObject(httpGet(url, null));
-                JSONObject cur = o.getJSONObject("current");
-                final long now = Math.round(cur.getDouble("temperature_2m"));
-                final int code = cur.getInt("weather_code");
-                runOnUiThread(() -> {
-                    weatherView.setText(symbol(code) + "  " + now + DEG);
-                    placeView.setText(prefs.getString("wx_name", "") + "  " + DOT + "  " + describe(code));
-                });
-            } catch (Exception ex) {
-                lastWeatherFetch = 0; // try again on the next check
-            }
-        }).start();
-    }
-
-    private static String httpGet(String address, String bearer) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(address).openConnection();
-        c.setConnectTimeout(10000);
-        c.setReadTimeout(10000);
-        c.setRequestProperty("Accept", "application/json");
-        if (bearer != null && !bearer.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + bearer);
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = r.readLine()) != null) sb.append(line);
-            return sb.toString();
-        } finally {
-            c.disconnect();
-        }
-    }
-
-    private static String symbol(int c) {
-        if (c == 0) return "\u2600\uFE0F";
-        if (c == 1) return "\uD83C\uDF24\uFE0F";
-        if (c == 2) return "\u26C5";
-        if (c == 3) return "\u2601\uFE0F";
-        if (c == 45 || c == 48) return "\uD83C\uDF2B\uFE0F";
-        if (c >= 51 && c <= 57) return "\uD83C\uDF26\uFE0F";
-        if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return "\uD83C\uDF27\uFE0F";
-        if ((c >= 71 && c <= 77) || c == 85 || c == 86) return "\uD83C\uDF28\uFE0F";
-        if (c >= 95) return "\u26C8\uFE0F";
-        return "\uD83C\uDF21\uFE0F";
-    }
-
-    private static String describe(int c) {
-        if (c == 0) return "Clear";
-        if (c == 1) return "Mostly clear";
-        if (c == 2) return "Partly cloudy";
-        if (c == 3) return "Cloudy";
-        if (c == 45 || c == 48) return "Fog";
-        if (c >= 51 && c <= 57) return "Drizzle";
-        if (c >= 61 && c <= 67) return "Rain";
-        if (c >= 71 && c <= 77) return "Snow";
-        if (c >= 80 && c <= 82) return "Showers";
-        if (c == 85 || c == 86) return "Snow showers";
-        if (c >= 95) return "Thunderstorms";
-        return "";
-    }
-
-    // ---------- Helpers ----------
-
-    private void launch(String pkg) {
-        Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
-        if (i == null) i = pm.getLaunchIntentForPackage(pkg);
-        if (i != null) startSafe(i);
-    }
-
-    private void startSafe(Intent i) {
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            startActivity(i);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private LinearLayout.LayoutParams size(int w, int h, int gap) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(w), dp(h));
-        lp.setMargins(dp(gap), dp(gap), dp(gap), dp(gap));
-        return lp;
-    }
-
-    private void style(TextView tv, int sp, boolean bold, int color) {
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        tv.setTextColor(color);
-        tv.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL));
-    }
-
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
-    }
-}
