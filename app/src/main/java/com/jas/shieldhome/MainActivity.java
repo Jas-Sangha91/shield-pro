@@ -1,14 +1,21 @@
 package com.jas.shieldhome;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -40,6 +47,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -58,42 +66,75 @@ public class MainActivity extends Activity {
             "org.xbmc.kodi"
     };
 
-    private static final int COLUMNS = 6;
-    private static final int DOCK_W = 160, DOCK_GAP = 7;
-    private static final int GRID_W = 128, GRID_H = 72, GRID_GAP = 8;
+    private static final int COLUMNS = 5;
+    private static final int DOCK_W = 176, DOCK_GAP = 7;
+    private static final int GRID_W = 152, GRID_H = 86, GRID_GAP = 8;
     private static final long WEATHER_EVERY_MS = 30 * 60 * 1000L;
+    private static final long VPN_EVERY_MS = 15 * 60 * 1000L;
+    private static final long IDLE_AFTER_MS = 20 * 1000L;
+    private static final int NEUTRAL_GLOW = 0xFF3A4A6B;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
     private static final String DEG = "\u00B0";
+    private static final String DOT = "\u00B7";
 
     private PackageManager pm;
     private SharedPreferences prefs;
+    private ConnectivityManager cm;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private ScrollView scroll;
     private LinearLayout content;
-    private TextView titleView, hintView, weatherView, placeView;
+    private TextView titleView, hintView, weatherView, placeView, vpnView;
+    private GradientDrawable baseBg, glow;
+    private int glowColor = 0x00000000;
+    private ValueAnimator glowAnim;
 
     private final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
     private final List<String> dock = new ArrayList<>();
     private final List<String> grid = new ArrayList<>();
     private final List<String> hidden = new ArrayList<>();
     private final Map<String, View> tileByPkg = new HashMap<>();
+    private final Map<String, Integer> colorByPkg = new HashMap<>();
+    private final List<View> allTiles = new ArrayList<>();
+    private final Map<View, Float> baseAlpha = new HashMap<>();
     private View firstTile;
 
     private String installedSignature = "";
     private boolean arranging = false;
     private String movingPkg = null;
     private boolean swallowBackUp = false;
+    private boolean idle = false;
     private List<String> backupDock = new ArrayList<>();
     private List<String> backupGrid = new ArrayList<>();
     private volatile long lastWeatherFetch = 0;
+
+    private ConnectivityManager.NetworkCallback netCallback;
+    private Boolean lastVpnState = null;
+    private String lastWhere = null;
+    private long lastIpFetch = 0;
 
     private final Runnable weatherTick = new Runnable() {
         @Override
         public void run() {
             if (System.currentTimeMillis() - lastWeatherFetch >= WEATHER_EVERY_MS) fetchWeather();
+            if (baseBg != null) baseBg.setColors(timeOfDayColors());
             handler.postDelayed(this, 5 * 60 * 1000L);
+        }
+    };
+
+    private final Runnable vpnTick = new Runnable() {
+        @Override
+        public void run() {
+            updateVpn(false);
+            handler.postDelayed(this, VPN_EVERY_MS);
+        }
+    };
+
+    private final Runnable idleRunnable = new Runnable() {
+        @Override
+        public void run() {
+            goIdle();
         }
     };
 
@@ -104,21 +145,30 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         pm = getPackageManager();
         prefs = getSharedPreferences("home", MODE_PRIVATE);
+        cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
         buildScreen();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        baseBg.setColors(timeOfDayColors());
         refreshInstalled();
         handler.removeCallbacks(weatherTick);
         handler.post(weatherTick);
+        registerNet();
+        handler.removeCallbacks(vpnTick);
+        handler.post(vpnTick);
+        resetIdle();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(weatherTick);
+        handler.removeCallbacks(vpnTick);
+        handler.removeCallbacks(idleRunnable);
+        unregisterNet();
     }
 
     @Override
@@ -141,6 +191,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (e.getAction() == KeyEvent.ACTION_DOWN) resetIdle();
         if (swallowBackUp && e.getKeyCode() == KeyEvent.KEYCODE_BACK && e.getAction() == KeyEvent.ACTION_UP) {
             swallowBackUp = false;
             return true;
@@ -166,17 +217,27 @@ public class MainActivity extends Activity {
 
     private void buildScreen() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFF1B2130, 0xFF07080C}));
+        baseBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, timeOfDayColors());
+        root.setBackground(baseBg);
+
+        // Soft glow that takes the colour of the selected app
+        glow = new GradientDrawable();
+        glow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glow.setGradientCenter(0.15f, 0.2f);
+        glow.setGradientRadius(dp(620));
+        glow.setColors(new int[]{0x00000000, 0x00000000});
+        View glowView = new View(this);
+        glowView.setBackground(glow);
+        root.addView(glowView, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Fixed header: selected app name on the left, clock and weather on the right
+        // Fixed header: selected app name on the left, clock, weather and VPN on the right
         FrameLayout header = new FrameLayout(this);
-        header.setPadding(dp(40), dp(28), dp(48), dp(4));
-        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
+        header.setPadding(dp(40), dp(26), dp(48), dp(4));
+        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(190)));
 
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -185,7 +246,7 @@ public class MainActivity extends Activity {
         titleView.setSingleLine(true);
         titleView.setText(" ");
         hintView = new TextView(this);
-        style(hintView, 14, false, 0xFFFFD54F);
+        style(hintView, 16, false, 0xFFFFD54F);
         hintView.setVisibility(View.GONE);
         left.addView(titleView);
         left.addView(hintView);
@@ -203,16 +264,20 @@ public class MainActivity extends Activity {
         TextClock date = new TextClock(this);
         date.setFormat12Hour("EEEE d MMMM");
         date.setFormat24Hour("EEEE d MMMM");
-        style(date, 14, false, 0xA0FFFFFF);
+        style(date, 16, false, 0xB0FFFFFF);
 
         weatherView = new TextView(this);
-        style(weatherView, 18, false, 0xFFFFFFFF);
-        weatherView.setPadding(0, dp(10), 0, 0);
+        style(weatherView, 20, false, 0xFFFFFFFF);
+        weatherView.setPadding(0, dp(8), 0, 0);
 
         placeView = new TextView(this);
-        style(placeView, 12, false, 0x99FFFFFF);
+        style(placeView, 14, false, 0xA0FFFFFF);
 
-        TextView[] lines = {time, date, weatherView, placeView};
+        vpnView = new TextView(this);
+        style(vpnView, 14, false, 0xA0FFFFFF);
+        vpnView.setPadding(0, dp(4), 0, 0);
+
+        TextView[] lines = {time, date, weatherView, placeView, vpnView};
         for (TextView tv : lines) {
             tv.setGravity(Gravity.END);
             info.addView(tv);
@@ -237,6 +302,73 @@ public class MainActivity extends Activity {
         showWeatherPlaceholder();
     }
 
+    private static int[] timeOfDayColors() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        if (h >= 5 && h < 10) return new int[]{0xFF1F2B3D, 0xFF080B12};   // morning
+        if (h >= 10 && h < 17) return new int[]{0xFF1B2130, 0xFF07080C};  // day
+        if (h >= 17 && h < 21) return new int[]{0xFF2A1F33, 0xFF0A070E};  // evening
+        return new int[]{0xFF10141F, 0xFF030407};                          // night
+    }
+
+    private void setGlow(int color) {
+        int target = (color & 0x00FFFFFF) | 0x55000000;
+        if (glowAnim != null) glowAnim.cancel();
+        glowAnim = ValueAnimator.ofArgb(glowColor, target);
+        glowAnim.setDuration(450);
+        glowAnim.addUpdateListener(a -> {
+            glowColor = (int) a.getAnimatedValue();
+            glow.setColors(new int[]{glowColor, glowColor & 0x00FFFFFF});
+        });
+        glowAnim.start();
+    }
+
+    private int colorFor(String pkg) {
+        Integer cached = colorByPkg.get(pkg);
+        if (cached != null) return cached;
+        int result = NEUTRAL_GLOW;
+        try {
+            ResolveInfo ri = installed.get(pkg);
+            Drawable d = ri.activityInfo.loadBanner(pm);
+            if (d == null) d = ri.activityInfo.applicationInfo.loadBanner(pm);
+            if (d == null) d = ri.loadIcon(pm);
+            if (d != null) result = dominantColor(d, NEUTRAL_GLOW);
+        } catch (Exception ignored) {
+        }
+        colorByPkg.put(pkg, result);
+        return result;
+    }
+
+    private static int dominantColor(Drawable src, int fallback) {
+        Drawable d = src.getConstantState() != null ? src.getConstantState().newDrawable().mutate() : src;
+        Bitmap b = Bitmap.createBitmap(32, 18, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        d.setBounds(0, 0, 32, 18);
+        d.draw(c);
+        float[] hsv = new float[3];
+        float[] weight = new float[12];
+        float[][] sum = new float[12][3];
+        for (int y = 0; y < 18; y++) {
+            for (int x = 0; x < 32; x++) {
+                int p = b.getPixel(x, y);
+                if (Color.alpha(p) < 128) continue;
+                Color.colorToHSV(p, hsv);
+                if (hsv[1] < 0.35f || hsv[2] < 0.25f) continue;
+                int bucket = Math.min(11, (int) (hsv[0] / 30f));
+                float w = hsv[1] * hsv[2];
+                weight[bucket] += w;
+                sum[bucket][0] += Color.red(p) * w;
+                sum[bucket][1] += Color.green(p) * w;
+                sum[bucket][2] += Color.blue(p) * w;
+            }
+        }
+        b.recycle();
+        int best = 0;
+        for (int i = 1; i < 12; i++) if (weight[i] > weight[best]) best = i;
+        if (weight[best] < 3f) return fallback;
+        float w = weight[best];
+        return Color.rgb((int) (sum[best][0] / w), (int) (sum[best][1] / w), (int) (sum[best][2] / w));
+    }
+
     private void refreshInstalled() {
         Map<String, ResolveInfo> found = new LinkedHashMap<>();
         Intent tv = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
@@ -259,6 +391,7 @@ public class MainActivity extends Activity {
         installedSignature = sig;
 
         installed.clear();
+        colorByPkg.clear();
         for (String p : names) installed.put(p, found.get(p));
         loadLayout();
         render(null);
@@ -267,6 +400,9 @@ public class MainActivity extends Activity {
     private void render(String focusPkg) {
         content.removeAllViews();
         tileByPkg.clear();
+        allTiles.clear();
+        baseAlpha.clear();
+        idle = false;
         firstTile = null;
 
         hintView.setText(movingPkg != null
@@ -313,9 +449,9 @@ public class MainActivity extends Activity {
         View spacer = new View(this);
         content.addView(spacer, new LinearLayout.LayoutParams(1, dp(12)));
         List<View> tools = new ArrayList<>();
-        tools.add(tile("Settings", null, null, false,
+        tools.add(tile("Settings", null, null, false, null,
                 () -> startSafe(new Intent(Settings.ACTION_SETTINGS))));
-        tools.add(tile(arranging ? "Done arranging" : "Customise", null, null, false,
+        tools.add(tile(arranging ? "Done arranging" : "Customise", null, null, false, null,
                 this::openCustomise));
         addRows(tools);
 
@@ -326,6 +462,7 @@ public class MainActivity extends Activity {
             for (String p : hidden) {
                 View t = appTile(p);
                 t.setAlpha(0.5f);
+                baseAlpha.put(t, 0.5f);
                 hiddenTiles.add(t);
             }
             addRows(hiddenTiles);
@@ -338,7 +475,7 @@ public class MainActivity extends Activity {
 
     private void addHeader(String text) {
         TextView h = new TextView(this);
-        style(h, 16, true, 0x99FFFFFF);
+        style(h, 18, true, 0xA0FFFFFF);
         h.setText(text);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
         lp.topMargin = dp(28);
@@ -367,13 +504,14 @@ public class MainActivity extends Activity {
         String label = ri.loadLabel(pm).toString();
         Drawable banner = ri.activityInfo.loadBanner(pm);
         if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-        View t = tile(label, banner, ri.loadIcon(pm), pkg.equals(movingPkg), () -> onAppClicked(pkg));
+        View t = tile(label, banner, ri.loadIcon(pm), pkg.equals(movingPkg), pkg, () -> onAppClicked(pkg));
         tileByPkg.put(pkg, t);
         if (firstTile == null) firstTile = t;
         return t;
     }
 
-    private View tile(final String label, Drawable banner, Drawable icon, boolean moving, final Runnable onClick) {
+    private View tile(final String label, Drawable banner, Drawable icon, boolean moving,
+                      final String colorPkg, final Runnable onClick) {
         FrameLayout t = new FrameLayout(this);
         t.setFocusable(true);
         t.setClickable(true);
@@ -396,10 +534,10 @@ public class MainActivity extends Activity {
             if (icon != null) {
                 ImageView iv = new ImageView(this);
                 iv.setImageDrawable(icon);
-                col.addView(iv, new LinearLayout.LayoutParams(dp(32), dp(32)));
+                col.addView(iv, new LinearLayout.LayoutParams(dp(36), dp(36)));
             }
             TextView tv = new TextView(this);
-            style(tv, 12, false, 0xFFFFFFFF);
+            style(tv, 13, false, 0xFFFFFFFF);
             tv.setText(label);
             tv.setSingleLine(true);
             tv.setGravity(Gravity.CENTER);
@@ -419,10 +557,127 @@ public class MainActivity extends Activity {
                     .translationZ(hasFocus ? dp(10) : 0)
                     .setDuration(150).start();
             ((FrameLayout) v).setForeground(hasFocus ? ring : null);
-            if (hasFocus && titleView != null) titleView.setText(label);
+            if (hasFocus) {
+                if (titleView != null) titleView.setText(label);
+                setGlow(colorPkg != null ? colorFor(colorPkg) : NEUTRAL_GLOW);
+            }
         });
         t.setOnClickListener(v -> onClick.run());
+
+        allTiles.add(t);
+        baseAlpha.put(t, 1f);
         return t;
+    }
+
+    // ---------- Idle dimming ----------
+
+    private void resetIdle() {
+        handler.removeCallbacks(idleRunnable);
+        handler.postDelayed(idleRunnable, IDLE_AFTER_MS);
+        if (idle) wake();
+    }
+
+    private void goIdle() {
+        if (arranging || movingPkg != null) return;
+        idle = true;
+        View f = getCurrentFocus();
+        for (View t : allTiles) {
+            if (t != f) t.animate().alpha(0.35f).setDuration(600).start();
+        }
+        if (f != null) f.animate().scaleX(1.18f).scaleY(1.18f).setDuration(600).start();
+    }
+
+    private void wake() {
+        idle = false;
+        View f = getCurrentFocus();
+        for (View t : allTiles) {
+            Float a = baseAlpha.get(t);
+            t.animate().alpha(a == null ? 1f : a).setDuration(200).start();
+        }
+        if (f != null) f.animate().scaleX(1.12f).scaleY(1.12f).setDuration(200).start();
+    }
+
+    // ---------- VPN status (location by ipwho.is) ----------
+
+    private void registerNet() {
+        if (netCallback != null || cm == null) return;
+        netCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network n) {
+                handler.postDelayed(() -> updateVpn(true), 2000);
+            }
+
+            @Override
+            public void onLost(Network n) {
+                handler.postDelayed(() -> updateVpn(true), 2000);
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network n, NetworkCapabilities c) {
+                handler.postDelayed(() -> updateVpn(false), 2000);
+            }
+        };
+        try {
+            cm.registerDefaultNetworkCallback(netCallback);
+        } catch (Exception e) {
+            netCallback = null;
+        }
+    }
+
+    private void unregisterNet() {
+        if (netCallback == null || cm == null) return;
+        try {
+            cm.unregisterNetworkCallback(netCallback);
+        } catch (Exception ignored) {
+        }
+        netCallback = null;
+    }
+
+    private boolean isVpnOn() {
+        if (cm == null) return false;
+        try {
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities c = cm.getNetworkCapabilities(n);
+                if (c != null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private void updateVpn(boolean force) {
+        final boolean on = isVpnOn();
+        boolean changed = lastVpnState == null || lastVpnState != on;
+        lastVpnState = on;
+        if (changed) {
+            lastWhere = null;
+            showVpn(on, null);
+        }
+        long now = System.currentTimeMillis();
+        if (!(changed || force || now - lastIpFetch > VPN_EVERY_MS)) return;
+        lastIpFetch = now;
+        new Thread(() -> {
+            String where = null;
+            try {
+                JSONObject o = new JSONObject(httpGet("https://ipwho.is/"));
+                if (o.optBoolean("success", false)) {
+                    String city = o.optString("city", "");
+                    String country = o.optString("country", "");
+                    where = city.isEmpty() ? country : city + ", " + country;
+                }
+            } catch (Exception ignored) {
+            }
+            final String w = where;
+            runOnUiThread(() -> showVpn(on, w));
+        }).start();
+    }
+
+    private void showVpn(boolean on, String where) {
+        if (where != null && !where.isEmpty()) lastWhere = where;
+        String text = "\u25CF  " + (on ? "VPN on" : "VPN off");
+        if (lastWhere != null) text += "  " + DOT + "  " + lastWhere;
+        vpnView.setText(text);
+        vpnView.setTextColor(on ? 0xFF7BD88F : 0xFFFFB74D);
     }
 
     // ---------- Arranging ----------
@@ -674,7 +929,7 @@ public class MainActivity extends Activity {
                 final long lo = Math.round(day.getJSONArray("temperature_2m_min").getDouble(0));
                 runOnUiThread(() -> {
                     weatherView.setText(symbol(code) + "  " + now + DEG + "    H " + hi + DEG + "  L " + lo + DEG);
-                    placeView.setText(prefs.getString("wx_name", "") + "  \u00B7  " + describe(code));
+                    placeView.setText(prefs.getString("wx_name", "") + "  " + DOT + "  " + describe(code));
                 });
             } catch (Exception ex) {
                 lastWeatherFetch = 0; // try again on the next check
