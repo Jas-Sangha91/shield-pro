@@ -736,11 +736,15 @@ final class DiscoverPage {
         buttons.addView(closeBtn, new LinearLayout.LayoutParams(WRAP, WRAP));
         info.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
 
+        // Where to watch (UK streaming services)
+        final WhereToWatch watch = new WhereToWatch(a, dialog);
+        outer.addView(watch.view(), new LinearLayout.LayoutParams(MATCH, WRAP));
+
         final TextView moreHeader = new TextView(a);
         style(moreHeader, 15, true, 0xA0FFFFFF);
         moreHeader.setText("More like this");
         moreHeader.setVisibility(View.GONE);
-        moreHeader.setPadding(0, dp(16), 0, dp(2));
+        moreHeader.setPadding(0, dp(12), 0, dp(2));
         outer.addView(moreHeader, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         final LinearLayout moreBand = new LinearLayout(a);
@@ -760,14 +764,14 @@ final class DiscoverPage {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(0x00000000));
         }
         dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(dp(800), dp(470));
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(dp(800), dp(510));
         trailerBtn.requestFocus();
 
         new Thread(() -> {
             try {
                 String extra = it.type.equals("movie") ? "release_dates" : "content_ratings";
                 JSONObject d = new JSONObject(tmdbGet("/" + it.type + "/" + it.id
-                        + "?language=en-US&append_to_response=videos,credits,recommendations," + extra));
+                        + "?language=en-US&append_to_response=videos,credits,recommendations,watch/providers," + extra));
 
                 List<String> g = new ArrayList<>();
                 JSONArray ga = d.optJSONArray("genres");
@@ -806,6 +810,7 @@ final class DiscoverPage {
                     }
                 }
 
+                final JSONObject providers = d.optJSONObject("watch/providers");
                 final String genreText = TextUtils.join(", ", g)
                         + (length.isEmpty() ? "" : (g.isEmpty() ? "" : SEP) + length);
                 final String overviewText = ov.isEmpty()
@@ -822,14 +827,15 @@ final class DiscoverPage {
                     cast.setText(castText);
                     trailerKey[0] = foundKey;
                     trailerBtn.setText(foundKey != null ? "\u25B6  Trailer" : "No trailer available");
+                    watch.show(providers);
                     if (!recs.isEmpty()) {
                         moreHeader.setVisibility(View.VISIBLE);
                         for (final Item r : recs) {
-                            View p = buildPoster(r, 64, 96, false, () -> {
+                            View p = buildPoster(r, 56, 84, false, () -> {
                                 dialog.dismiss();
                                 openInfo(r);
                             });
-                            moreBand.addView(p, a.size(64, 96, 6));
+                            moreBand.addView(p, a.size(56, 84, 6));
                         }
                     }
                 });
@@ -838,6 +844,7 @@ final class DiscoverPage {
                     overview.setText(it.overview.isEmpty()
                             ? "Couldn't load details. Check the internet connection." : it.overview);
                     trailerBtn.setText("No trailer available");
+                    watch.failed();
                 });
             }
         }).start();
