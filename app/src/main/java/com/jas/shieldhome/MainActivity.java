@@ -52,15 +52,19 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
@@ -109,7 +113,11 @@ public class MainActivity extends Activity {
     private static final String TMDB_API = "https://api.themoviedb.org/3";
     private static final String TMDB_IMG = "https://image.tmdb.org/t/p/";
     private static final long DISCOVER_REFRESH_MS = 3 * 60 * 60 * 1000L;
+    private static final long SPOT_EVERY_MS = 8000L;
+    private static final int ROW_MAX = 12;
+    private static final int SPOT_COUNT = 5;
     private static final int POSTER_W = 100, POSTER_H = 150;
+    private static final int SPOT_BG = 0xFF0E1118;
 
     private static final int COLUMNS = 5;
     private static final int DOCK_W = 176, DOCK_GAP = 7;
@@ -130,6 +138,7 @@ public class MainActivity extends Activity {
     private static final String DEG = "\u00B0";
     private static final String DOT = "\u00B7";
     private static final String STAR = "\u2605";
+    private static final String SEP = "   \u00B7   ";
 
     private static class Item {
         int id;
@@ -137,8 +146,14 @@ public class MainActivity extends Activity {
         String title;
         String poster;
         String backdrop;
+        String overview;
+        String date;
         double rating;
         String year;
+
+        String key() {
+            return type + ":" + id;
+        }
     }
 
     private static class Row {
@@ -186,11 +201,24 @@ public class MainActivity extends Activity {
     private String lastWhere = null;
     private long lastIpFetch = 0;
 
+    // Discover state
     private List<Row> discoverRows = null;
+    private List<Item> discoverSpot = new ArrayList<>();
     private long discoverAt = 0;
     private long discoverTriedAt = 0;
     private boolean discoverLoading = false;
     private boolean discoverError = false;
+    private final Map<String, String> trailerCache = new HashMap<>();
+
+    // Spotlight views
+    private ImageView spotBackdrop;
+    private TextView spotTitle, spotMeta, spotDesc, spotTrailer, spotList, spotSurprise;
+    private final List<View> spotDots = new ArrayList<>();
+    private int spotIndex = 0;
+
+    // My list row
+    private LinearLayout myListSection;
+    private final List<View> myListTiles = new ArrayList<>();
 
     private final LruCache<String, Bitmap> imageCache = new LruCache<String, Bitmap>(24 * 1024 * 1024) {
         @Override
@@ -224,6 +252,16 @@ public class MainActivity extends Activity {
         }
     };
 
+    private final Runnable spotTick = new Runnable() {
+        @Override
+        public void run() {
+            if (onDiscover && spotTitle != null && !spotlightFocused() && hasWindowFocus()) {
+                showSpot(spotIndex + 1, true);
+            }
+            handler.postDelayed(this, SPOT_EVERY_MS);
+        }
+    };
+
     // ---------- Lifecycle ----------
 
     @Override
@@ -245,6 +283,8 @@ public class MainActivity extends Activity {
         registerNet();
         handler.removeCallbacks(vpnTick);
         handler.post(vpnTick);
+        handler.removeCallbacks(spotTick);
+        if (onDiscover && spotTitle != null) handler.postDelayed(spotTick, SPOT_EVERY_MS);
         resetIdle();
     }
 
@@ -254,6 +294,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(weatherTick);
         handler.removeCallbacks(vpnTick);
         handler.removeCallbacks(idleRunnable);
+        handler.removeCallbacks(spotTick);
         unregisterNet();
     }
 
@@ -626,6 +667,13 @@ public class MainActivity extends Activity {
     }
 
     private void render(String focusPkg, boolean takeFocus) {
+        handler.removeCallbacks(spotTick);
+        spotTitle = null;
+        spotBackdrop = null;
+        spotDots.clear();
+        myListSection = null;
+        myListTiles.clear();
+
         content.removeAllViews();
         tileByPkg.clear();
         allTiles.clear();
@@ -723,6 +771,10 @@ public class MainActivity extends Activity {
     }
 
     private void addHeader(String text) {
+        addHeaderTo(content, text);
+    }
+
+    private void addHeaderTo(LinearLayout parent, String text) {
         TextView h = new TextView(this);
         style(h, 18, true, 0xA0FFFFFF);
         h.setText(text);
@@ -730,7 +782,7 @@ public class MainActivity extends Activity {
         lp.topMargin = dp(24);
         lp.bottomMargin = dp(4);
         lp.leftMargin = dp(12);
-        content.addView(h, lp);
+        parent.addView(h, lp);
     }
 
     private void addRows(LinearLayout parent, List<View> views, int cols, int w, int h, int gap) {
@@ -908,27 +960,24 @@ public class MainActivity extends Activity {
                 discoverMessage("Couldn't load Discover",
                         "Check the internet connection, then open Discover again in a moment.");
             } else {
-                discoverMessage("Loading films and series\u2026", "");
+                discoverMessage("Finding something good to watch\u2026", "");
             }
             return;
         }
 
+        if (!discoverSpot.isEmpty()) buildSpotlight();
+
+        myListSection = new LinearLayout(this);
+        myListSection.setOrientation(LinearLayout.VERTICAL);
+        myListSection.setClipChildren(false);
+        myListSection.setClipToPadding(false);
+        content.addView(myListSection, new LinearLayout.LayoutParams(MATCH, WRAP));
+        refreshMyListRow();
+
         for (Row r : discoverRows) {
             if (r.items.isEmpty()) continue;
             addHeader(r.title);
-            LinearLayout band = new LinearLayout(this);
-            band.setOrientation(LinearLayout.HORIZONTAL);
-            band.setPadding(dp(12), dp(4), dp(12), dp(4));
-            band.setClipChildren(false);
-            band.setClipToPadding(false);
-            for (Item it : r.items) band.addView(posterTile(it), size(POSTER_W, POSTER_H, 8));
-
-            HorizontalScrollView hs = new HorizontalScrollView(this);
-            hs.setHorizontalScrollBarEnabled(false);
-            hs.setClipChildren(false);
-            hs.setClipToPadding(false);
-            hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
-            content.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
+            posterRow(content, r.items, null);
         }
 
         TextView credit = new TextView(this);
@@ -964,24 +1013,59 @@ public class MainActivity extends Activity {
         discoverError = false;
         discoverTriedAt = System.currentTimeMillis();
         new Thread(() -> {
+            final List<Item> spot = new ArrayList<>();
             final List<Row> rows = new ArrayList<>();
             boolean ok = true;
             try {
-                rows.add(fetchRow("Trending this week", "/trending/all/week", null));
-                rows.add(fetchRow("Popular films", "/movie/popular", "movie"));
-                rows.add(fetchRow("Popular series", "/tv/popular", "tv"));
-                rows.add(fetchRow("Top rated films", "/movie/top_rated", "movie"));
-                rows.add(fetchRow("Top rated series", "/tv/top_rated", "tv"));
-                rows.add(fetchRow("Coming soon", "/movie/upcoming", "movie"));
+                Set<String> seen = new HashSet<>();
+
+                JSONArray trending = new JSONObject(tmdbGet("/trending/all/week?language=en-US"))
+                        .getJSONArray("results");
+                Row trendRow = new Row();
+                trendRow.title = "Trending this week";
+                for (int i = 0; i < trending.length(); i++) {
+                    Item it = parseItem(trending.getJSONObject(i), null);
+                    if (it == null || seen.contains(it.key())) continue;
+                    if (spot.size() < SPOT_COUNT && !it.backdrop.isEmpty() && !it.overview.isEmpty()) {
+                        spot.add(it);
+                        seen.add(it.key());
+                    } else if (trendRow.items.size() < ROW_MAX) {
+                        trendRow.items.add(it);
+                        seen.add(it.key());
+                    }
+                }
+                rows.add(trendRow);
+
+                rows.add(fetchRow("New and highly rated",
+                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=300"
+                                + "&primary_release_date.gte=" + dateOffset(-15) + "&primary_release_date.lte=" + dateOffset(0),
+                        "movie", seen, null));
+
+                rows.add(fetchRow("Binge-worthy series",
+                        "/discover/tv?language=en-US&sort_by=popularity.desc&vote_average.gte=8&vote_count.gte=500",
+                        "tv", seen, null));
+
+                String[] mood = moodForToday();
+                rows.add(fetchRow("Tonight's mood: " + mood[1],
+                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=500"
+                                + "&with_genres=" + mood[0],
+                        "movie", seen, null));
+
+                rows.add(fetchRow("Coming soon", "/movie/upcoming?language=en-US", "movie", seen, dateOffset(0)));
             } catch (Exception e) {
                 ok = false;
             }
             final boolean success = ok;
+            if (success) {
+                for (Item it : spot) prefetch(TMDB_IMG + "w780" + it.backdrop);
+            }
             runOnUiThread(() -> {
                 discoverLoading = false;
                 if (success) {
+                    discoverSpot = spot;
                     discoverRows = rows;
                     discoverAt = System.currentTimeMillis();
+                    spotIndex = 0;
                 } else {
                     discoverError = true;
                 }
@@ -990,29 +1074,55 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private Row fetchRow(String title, String path, String forcedType) throws Exception {
-        JSONObject o = new JSONObject(tmdbGet(path + "?language=en-US&page=1"));
-        JSONArray res = o.getJSONArray("results");
+    private Row fetchRow(String title, String path, String type, Set<String> seen, String minDate) throws Exception {
+        JSONArray res = new JSONObject(tmdbGet(path)).getJSONArray("results");
         Row row = new Row();
         row.title = title;
-        for (int i = 0; i < res.length(); i++) {
-            JSONObject j = res.getJSONObject(i);
-            String type = forcedType != null ? forcedType : str(j, "media_type");
-            if (!type.equals("movie") && !type.equals("tv")) continue;
-            String poster = str(j, "poster_path");
-            if (poster.isEmpty()) continue;
-            Item it = new Item();
-            it.id = j.getInt("id");
-            it.type = type;
-            it.title = type.equals("movie") ? str(j, "title") : str(j, "name");
-            it.poster = poster;
-            it.backdrop = str(j, "backdrop_path");
-            it.rating = j.optDouble("vote_average", 0);
-            String date = type.equals("movie") ? str(j, "release_date") : str(j, "first_air_date");
-            it.year = date.length() >= 4 ? date.substring(0, 4) : "";
+        for (int i = 0; i < res.length() && row.items.size() < ROW_MAX; i++) {
+            Item it = parseItem(res.getJSONObject(i), type);
+            if (it == null || seen.contains(it.key())) continue;
+            if (minDate != null && (it.date.isEmpty() || it.date.compareTo(minDate) < 0)) continue;
             row.items.add(it);
+            seen.add(it.key());
         }
         return row;
+    }
+
+    private static Item parseItem(JSONObject j, String forcedType) {
+        String type = forcedType != null ? forcedType : str(j, "media_type");
+        if (!type.equals("movie") && !type.equals("tv")) return null;
+        String poster = str(j, "poster_path");
+        if (poster.isEmpty()) return null;
+        Item it = new Item();
+        it.id = j.optInt("id", 0);
+        if (it.id == 0) return null;
+        it.type = type;
+        it.title = type.equals("movie") ? str(j, "title") : str(j, "name");
+        it.poster = poster;
+        it.backdrop = str(j, "backdrop_path");
+        it.overview = str(j, "overview");
+        it.rating = j.optDouble("vote_average", 0);
+        it.date = type.equals("movie") ? str(j, "release_date") : str(j, "first_air_date");
+        it.year = it.date.length() >= 4 ? it.date.substring(0, 4) : "";
+        return it;
+    }
+
+    private static String dateOffset(int months) {
+        Calendar c = Calendar.getInstance();
+        c.add(Calendar.MONTH, months);
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(c.getTime());
+    }
+
+    private static String[] moodForToday() {
+        switch (Calendar.getInstance().get(Calendar.DAY_OF_WEEK)) {
+            case Calendar.MONDAY: return new String[]{"35", "Comedy"};
+            case Calendar.TUESDAY: return new String[]{"53", "Thriller"};
+            case Calendar.WEDNESDAY: return new String[]{"878", "Sci-fi"};
+            case Calendar.THURSDAY: return new String[]{"80", "Crime"};
+            case Calendar.FRIDAY: return new String[]{"28", "Action"};
+            case Calendar.SATURDAY: return new String[]{"10751", "Family"};
+            default: return new String[]{"18", "Drama"};
+        }
     }
 
     private static String str(JSONObject j, String key) {
@@ -1029,10 +1139,308 @@ public class MainActivity extends Activity {
         if (it.rating > 0) parts.add(STAR + " " + String.format(Locale.UK, "%.1f", it.rating));
         if (!it.year.isEmpty()) parts.add(it.year);
         parts.add(it.type.equals("movie") ? "Film" : "Series");
-        return TextUtils.join("   " + DOT + "   ", parts);
+        return TextUtils.join(SEP, parts);
     }
 
-    private View posterTile(final Item it) {
+    // Spotlight
+
+    private void buildSpotlight() {
+        FrameLayout box = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(18));
+        bg.setColor(SPOT_BG);
+        box.setBackground(bg);
+        box.setClipToOutline(true);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(MATCH, dp(236));
+        blp.setMargins(dp(12), dp(6), dp(12), dp(6));
+        content.addView(box, blp);
+
+        spotBackdrop = new ImageView(this);
+        spotBackdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        box.addView(spotBackdrop, new FrameLayout.LayoutParams(dp(560), MATCH, Gravity.END));
+
+        View shadeLeft = new View(this);
+        shadeLeft.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{SPOT_BG, 0xB30E1118, 0x000E1118}));
+        box.addView(shadeLeft, new FrameLayout.LayoutParams(dp(560), MATCH, Gravity.END));
+
+        View shadeBottom = new View(this);
+        shadeBottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x000E1118, SPOT_BG}));
+        box.addView(shadeBottom, new FrameLayout.LayoutParams(MATCH, dp(70), Gravity.BOTTOM));
+
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.setPadding(dp(26), dp(20), dp(26), dp(20));
+        text.setClipChildren(false);
+        text.setClipToPadding(false);
+
+        TextView label = new TextView(this);
+        style(label, 13, true, 0xFFC9A8F0);
+        label.setText("Tonight's pick");
+        text.addView(label);
+
+        spotTitle = new TextView(this);
+        style(spotTitle, 30, true, 0xFFFFFFFF);
+        spotTitle.setSingleLine(true);
+        spotTitle.setEllipsize(TextUtils.TruncateAt.END);
+        spotTitle.setMaxWidth(dp(480));
+        spotTitle.setPadding(0, dp(2), 0, 0);
+        text.addView(spotTitle);
+
+        spotMeta = new TextView(this);
+        style(spotMeta, 15, false, SOFT_TEXT);
+        spotMeta.setPadding(0, dp(2), 0, 0);
+        text.addView(spotMeta);
+
+        spotDesc = new TextView(this);
+        style(spotDesc, 15, false, 0xFFE6E8EE);
+        spotDesc.setMaxLines(3);
+        spotDesc.setEllipsize(TextUtils.TruncateAt.END);
+        spotDesc.setLineSpacing(0, 1.15f);
+        spotDesc.setMaxWidth(dp(440));
+        spotDesc.setPadding(0, dp(8), 0, 0);
+        text.addView(spotDesc);
+
+        text.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setClipChildren(false);
+        spotTrailer = pillButton("\u25B6  Trailer", () -> playTrailerFor(currentSpot()), this::onSpotFocus);
+        spotList = pillButton("+  My list", () -> {
+            toggleMyList(currentSpot());
+            updateSpotListButton();
+        }, this::onSpotFocus);
+        spotSurprise = pillButton("Surprise me", this::surpriseMe, this::onSpotFocus);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(WRAP, WRAP);
+        bl.rightMargin = dp(10);
+        buttons.addView(spotTrailer, bl);
+        LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
+        bl2.rightMargin = dp(10);
+        buttons.addView(spotList, bl2);
+        buttons.addView(spotSurprise);
+        text.addView(buttons);
+
+        box.addView(text, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        LinearLayout dots = new LinearLayout(this);
+        dots.setOrientation(LinearLayout.HORIZONTAL);
+        spotDots.clear();
+        for (int i = 0; i < discoverSpot.size(); i++) {
+            View d = new View(this);
+            GradientDrawable dbg = new GradientDrawable();
+            dbg.setCornerRadius(dp(2));
+            dbg.setColor(0x59FFFFFF);
+            d.setBackground(dbg);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(6), dp(4));
+            dlp.leftMargin = dp(5);
+            dots.addView(d, dlp);
+            spotDots.add(d);
+        }
+        FrameLayout.LayoutParams dotsLp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.END);
+        dotsLp.setMargins(0, 0, dp(24), dp(22));
+        box.addView(dots, dotsLp);
+
+        showSpot(spotIndex, false);
+        handler.removeCallbacks(spotTick);
+        handler.postDelayed(spotTick, SPOT_EVERY_MS);
+    }
+
+    private Item currentSpot() {
+        if (discoverSpot.isEmpty()) return null;
+        return discoverSpot.get(Math.max(0, Math.min(spotIndex, discoverSpot.size() - 1)));
+    }
+
+    private boolean spotlightFocused() {
+        return (spotTrailer != null && spotTrailer.isFocused())
+                || (spotList != null && spotList.isFocused())
+                || (spotSurprise != null && spotSurprise.isFocused());
+    }
+
+    private void showSpot(int i, boolean animate) {
+        if (discoverSpot.isEmpty() || spotTitle == null) return;
+        int n = discoverSpot.size();
+        spotIndex = ((i % n) + n) % n;
+        final Item it = discoverSpot.get(spotIndex);
+        spotTitle.setText(it.title);
+        spotMeta.setText(meta(it));
+        spotDesc.setText(it.overview);
+        updateSpotListButton();
+
+        for (int k = 0; k < spotDots.size(); k++) {
+            View d = spotDots.get(k);
+            boolean active = k == spotIndex;
+            ((GradientDrawable) d.getBackground()).setColor(active ? 0xFFFFFFFF : 0x59FFFFFF);
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) d.getLayoutParams();
+            lp.width = dp(active ? 18 : 6);
+            d.setLayoutParams(lp);
+        }
+
+        final String url = TMDB_IMG + "w780" + it.backdrop;
+        final ImageView target = spotBackdrop;
+        if (animate && target != null) {
+            target.animate().alpha(0f).setDuration(250).withEndAction(() -> {
+                loadImage(url, target);
+                target.animate().alpha(1f).setDuration(450).start();
+            }).start();
+        } else if (target != null) {
+            loadImage(url, target);
+        }
+        if (spotlightFocused()) onSpotFocus();
+    }
+
+    private void onSpotFocus() {
+        Item it = currentSpot();
+        if (it == null) return;
+        titleView.setText(it.title);
+        metaView.setText(meta(it));
+        Drawable d = spotBackdrop != null ? spotBackdrop.getDrawable() : null;
+        setGlow(d != null ? dominantColor(d, NEUTRAL_GLOW) : NEUTRAL_GLOW);
+    }
+
+    private void updateSpotListButton() {
+        Item it = currentSpot();
+        if (spotList == null || it == null) return;
+        spotList.setText(isInMyList(it) ? "\u2713  In My list" : "+  My list");
+    }
+
+    // Surprise me
+
+    private void surpriseMe() {
+        Toast.makeText(this, "Finding something good\u2026", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            Item pick = null;
+            try {
+                Random r = new Random();
+                String type = r.nextBoolean() ? "movie" : "tv";
+                String base = "/discover/" + type + "?language=en-US&sort_by=popularity.desc"
+                        + "&vote_average.gte=7.5&vote_count.gte=1000&page=";
+                JSONArray res = new JSONObject(tmdbGet(base + (1 + r.nextInt(10)))).getJSONArray("results");
+                if (res.length() == 0) res = new JSONObject(tmdbGet(base + 1)).getJSONArray("results");
+                List<Item> options = new ArrayList<>();
+                for (int i = 0; i < res.length(); i++) {
+                    Item it = parseItem(res.getJSONObject(i), type);
+                    if (it != null) options.add(it);
+                }
+                if (!options.isEmpty()) pick = options.get(r.nextInt(options.size()));
+            } catch (Exception ignored) {
+            }
+            final Item chosen = pick;
+            runOnUiThread(() -> {
+                if (chosen != null) openInfo(chosen);
+                else Toast.makeText(this, "Couldn't find a pick right now. Try again in a moment.",
+                        Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    // My list
+
+    private List<Item> loadMyList() {
+        List<Item> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(prefs.getString("mylist", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                Item it = new Item();
+                it.id = o.optInt("id", 0);
+                it.type = str(o, "type");
+                it.title = str(o, "title");
+                it.poster = str(o, "poster");
+                it.backdrop = str(o, "backdrop");
+                it.overview = str(o, "overview");
+                it.date = str(o, "date");
+                it.rating = o.optDouble("rating", 0);
+                it.year = str(o, "year");
+                if (it.id != 0 && !it.poster.isEmpty()) out.add(it);
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    private void saveMyList(List<Item> list) {
+        JSONArray a = new JSONArray();
+        try {
+            for (Item it : list) {
+                JSONObject o = new JSONObject();
+                o.put("id", it.id);
+                o.put("type", it.type);
+                o.put("title", it.title);
+                o.put("poster", it.poster);
+                o.put("backdrop", it.backdrop);
+                o.put("overview", it.overview);
+                o.put("date", it.date);
+                o.put("rating", it.rating);
+                o.put("year", it.year);
+                a.put(o);
+            }
+        } catch (Exception ignored) {
+        }
+        prefs.edit().putString("mylist", a.toString()).apply();
+    }
+
+    private boolean isInMyList(Item it) {
+        if (it == null) return false;
+        for (Item m : loadMyList()) if (m.key().equals(it.key())) return true;
+        return false;
+    }
+
+    private boolean toggleMyList(Item it) {
+        if (it == null) return false;
+        List<Item> list = loadMyList();
+        boolean removed = false;
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).key().equals(it.key())) {
+                list.remove(i);
+                removed = true;
+                break;
+            }
+        }
+        if (!removed) list.add(0, it);
+        saveMyList(list);
+        refreshMyListRow();
+        Toast.makeText(this, removed ? "Removed from My list" : "Added to My list", Toast.LENGTH_SHORT).show();
+        return !removed;
+    }
+
+    private void refreshMyListRow() {
+        if (myListSection == null) return;
+        for (View v : myListTiles) {
+            allTiles.remove(v);
+            baseAlpha.remove(v);
+        }
+        myListTiles.clear();
+        myListSection.removeAllViews();
+        List<Item> list = loadMyList();
+        if (list.isEmpty()) return;
+        addHeaderTo(myListSection, "My list");
+        posterRow(myListSection, list, myListTiles);
+    }
+
+    // Posters
+
+    private void posterRow(LinearLayout parent, List<Item> items, List<View> track) {
+        LinearLayout band = new LinearLayout(this);
+        band.setOrientation(LinearLayout.HORIZONTAL);
+        band.setPadding(dp(12), dp(4), dp(12), dp(4));
+        band.setClipChildren(false);
+        band.setClipToPadding(false);
+        for (final Item it : items) {
+            View p = register(buildPoster(it, POSTER_W, POSTER_H, true, () -> openInfo(it)));
+            if (track != null) track.add(p);
+            band.addView(p, size(POSTER_W, POSTER_H, 8));
+        }
+        HorizontalScrollView hs = new HorizontalScrollView(this);
+        hs.setHorizontalScrollBarEnabled(false);
+        hs.setClipChildren(false);
+        hs.setClipToPadding(false);
+        hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
+        parent.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
+    }
+
+    private View buildPoster(final Item it, int w, int h, final boolean updateHeader, final Runnable onClick) {
         FrameLayout t = new FrameLayout(this);
         t.setFocusable(true);
         t.setClickable(true);
@@ -1056,15 +1464,40 @@ public class MainActivity extends Activity {
             v.animate().scaleX(f ? 1.1f : 1f).scaleY(f ? 1.1f : 1f)
                     .translationZ(f ? dp(10) : 0).setDuration(150).start();
             ((FrameLayout) v).setForeground(f ? ring : null);
-            if (f) {
+            if (f && updateHeader) {
                 titleView.setText(it.title);
                 metaView.setText(meta(it));
                 Drawable d = iv.getDrawable();
                 setGlow(d != null ? dominantColor(d, NEUTRAL_GLOW) : NEUTRAL_GLOW);
             }
         });
-        t.setOnClickListener(v -> openInfo(it));
-        return register(t);
+        t.setOnClickListener(v -> onClick.run());
+        return t;
+    }
+
+    private Bitmap fetchBitmap(String url) {
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(15000);
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inPreferredConfig = Bitmap.Config.RGB_565;
+            try (InputStream in = c.getInputStream()) {
+                return BitmapFactory.decodeStream(in, null, o);
+            } finally {
+                c.disconnect();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void prefetch(final String url) {
+        if (imageCache.get(url) != null) return;
+        imagePool.execute(() -> {
+            Bitmap b = fetchBitmap(url);
+            if (b != null) imageCache.put(url, b);
+        });
     }
 
     private void loadImage(final String url, final ImageView into) {
@@ -1074,31 +1507,21 @@ public class MainActivity extends Activity {
             into.setImageBitmap(cached);
             return;
         }
+        into.setImageDrawable(null);
         imagePool.execute(() -> {
-            Bitmap b = null;
-            try {
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                c.setConnectTimeout(10000);
-                c.setReadTimeout(15000);
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inPreferredConfig = Bitmap.Config.RGB_565;
-                try (InputStream in = c.getInputStream()) {
-                    b = BitmapFactory.decodeStream(in, null, o);
-                } finally {
-                    c.disconnect();
-                }
-            } catch (Exception ignored) {
-            }
+            Bitmap b = fetchBitmap(url);
             if (b == null) return;
             imageCache.put(url, b);
-            final Bitmap fb = b;
             runOnUiThread(() -> {
-                if (url.equals(into.getTag())) into.setImageBitmap(fb);
+                if (url.equals(into.getTag())) into.setImageBitmap(b);
             });
         });
     }
 
+    // Info card
+
     private void openInfo(final Item it) {
+        if (it == null) return;
         final Dialog dialog = new Dialog(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
 
         FrameLayout root = new FrameLayout(this);
@@ -1115,14 +1538,20 @@ public class MainActivity extends Activity {
 
         View shade = new View(this);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xF20B0E14, 0xCC0B0E14, 0x990B0E14}));
+                new int[]{0xF20B0E14, 0xD90B0E14, 0xA60B0E14}));
         root.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.HORIZONTAL);
-        body.setPadding(dp(28), dp(28), dp(28), dp(24));
-        body.setClipChildren(false);
-        root.addView(body, new FrameLayout.LayoutParams(MATCH, MATCH));
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(26), dp(24), dp(26), dp(16));
+        outer.setClipChildren(false);
+        outer.setClipToPadding(false);
+        root.addView(outer, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setClipChildren(false);
+        outer.addView(top, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -1132,50 +1561,50 @@ public class MainActivity extends Activity {
         poster.setBackground(pbg);
         poster.setClipToOutline(true);
         loadImage(TMDB_IMG + "w342" + it.poster, poster);
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(170), dp(255));
-        plp.rightMargin = dp(28);
-        body.addView(poster, plp);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(140), dp(210));
+        plp.rightMargin = dp(24);
+        top.addView(poster, plp);
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
-        body.addView(info, new LinearLayout.LayoutParams(0, MATCH, 1f));
+        info.setClipChildren(false);
+        top.addView(info, new LinearLayout.LayoutParams(0, dp(210), 1f));
 
         TextView title = new TextView(this);
-        style(title, 28, true, 0xFFFFFFFF);
+        style(title, 26, true, 0xFFFFFFFF);
         title.setText(it.title);
-        title.setMaxLines(2);
+        title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         info.addView(title);
 
         final TextView metaLine = new TextView(this);
-        style(metaLine, 16, false, SOFT_TEXT);
+        style(metaLine, 15, false, SOFT_TEXT);
         metaLine.setText(meta(it));
-        metaLine.setPadding(0, dp(6), 0, 0);
+        metaLine.setPadding(0, dp(4), 0, 0);
         info.addView(metaLine);
 
         final TextView genres = new TextView(this);
-        style(genres, 15, false, SOFT_TEXT);
-        genres.setPadding(0, dp(4), 0, 0);
+        style(genres, 14, false, SOFT_TEXT);
+        genres.setPadding(0, dp(2), 0, 0);
         info.addView(genres);
 
         final TextView overview = new TextView(this);
-        style(overview, 16, false, 0xFFFFFFFF);
-        overview.setText("Loading details\u2026");
-        overview.setMaxLines(6);
+        style(overview, 15, false, 0xFFFFFFFF);
+        overview.setText(it.overview.isEmpty() ? "Loading details\u2026" : it.overview);
+        overview.setMaxLines(4);
         overview.setEllipsize(TextUtils.TruncateAt.END);
-        overview.setLineSpacing(0, 1.2f);
-        overview.setPadding(0, dp(14), 0, 0);
+        overview.setLineSpacing(0, 1.15f);
+        overview.setPadding(0, dp(10), 0, 0);
         info.addView(overview);
 
         final TextView cast = new TextView(this);
-        style(cast, 14, false, SOFT_TEXT);
-        cast.setPadding(0, dp(12), 0, 0);
-        cast.setMaxLines(2);
+        style(cast, 13, false, SOFT_TEXT);
+        cast.setPadding(0, dp(8), 0, 0);
+        cast.setSingleLine(true);
         cast.setEllipsize(TextUtils.TruncateAt.END);
         info.addView(cast);
 
-        View spacer = new View(this);
-        info.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1f));
+        info.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -1186,26 +1615,55 @@ public class MainActivity extends Activity {
                 dialog.dismiss();
                 playTrailer(trailerKey[0]);
             }
-        });
-        TextView closeBtn = pillButton("Close", dialog::dismiss);
+        }, null);
+        final TextView[] listBtnHolder = new TextView[1];
+        listBtnHolder[0] = pillButton(isInMyList(it) ? "\u2713  In My list" : "+  My list", () -> {
+            boolean nowIn = toggleMyList(it);
+            listBtnHolder[0].setText(nowIn ? "\u2713  In My list" : "+  My list");
+            updateSpotListButton();
+        }, null);
+        TextView closeBtn = pillButton("Close", dialog::dismiss, null);
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(WRAP, WRAP);
-        bl.rightMargin = dp(12);
+        bl.rightMargin = dp(10);
         buttons.addView(trailerBtn, bl);
+        LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
+        bl2.rightMargin = dp(10);
+        buttons.addView(listBtnHolder[0], bl2);
         buttons.addView(closeBtn);
         info.addView(buttons);
+
+        final TextView moreHeader = new TextView(this);
+        style(moreHeader, 15, true, 0xA0FFFFFF);
+        moreHeader.setText("More like this");
+        moreHeader.setVisibility(View.GONE);
+        moreHeader.setPadding(0, dp(16), 0, dp(2));
+        outer.addView(moreHeader);
+
+        final LinearLayout moreBand = new LinearLayout(this);
+        moreBand.setOrientation(LinearLayout.HORIZONTAL);
+        moreBand.setPadding(0, dp(4), dp(8), dp(4));
+        moreBand.setClipChildren(false);
+        moreBand.setClipToPadding(false);
+        HorizontalScrollView moreScroll = new HorizontalScrollView(this);
+        moreScroll.setHorizontalScrollBarEnabled(false);
+        moreScroll.setClipChildren(false);
+        moreScroll.setClipToPadding(false);
+        moreScroll.addView(moreBand, new FrameLayout.LayoutParams(WRAP, WRAP));
+        outer.addView(moreScroll, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         dialog.setContentView(root);
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(0x00000000));
         }
         dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(dp(780), dp(340));
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(dp(800), dp(470));
         trailerBtn.requestFocus();
 
         new Thread(() -> {
             try {
+                String extra = it.type.equals("movie") ? "release_dates" : "content_ratings";
                 JSONObject d = new JSONObject(tmdbGet("/" + it.type + "/" + it.id
-                        + "?language=en-US&append_to_response=videos,credits"));
+                        + "?language=en-US&append_to_response=videos,credits,recommendations," + extra));
 
                 List<String> g = new ArrayList<>();
                 JSONArray ga = d.optJSONArray("genres");
@@ -1227,45 +1685,145 @@ public class MainActivity extends Activity {
                 JSONArray ca = credits != null ? credits.optJSONArray("cast") : null;
                 if (ca != null) for (int i = 0; i < ca.length() && i < 3; i++) names.add(str(ca.getJSONObject(i), "name"));
 
-                String key = null;
                 JSONObject videos = d.optJSONObject("videos");
-                JSONArray va = videos != null ? videos.optJSONArray("results") : null;
-                if (va != null) {
-                    for (int pass = 0; pass < 2 && key == null; pass++) {
-                        for (int i = 0; i < va.length(); i++) {
-                            JSONObject v = va.getJSONObject(i);
-                            if (!"YouTube".equals(str(v, "site"))) continue;
-                            String vt = str(v, "type");
-                            boolean good = pass == 0 ? "Trailer".equals(vt) : ("Teaser".equals(vt) || "Trailer".equals(vt));
-                            if (good) {
-                                key = str(v, "key");
-                                break;
-                            }
-                        }
+                String key = pickTrailer(videos != null ? videos.optJSONArray("results") : null);
+
+                String age = ageRating(d, it.type);
+
+                final List<Item> recs = new ArrayList<>();
+                JSONObject rec = d.optJSONObject("recommendations");
+                JSONArray ra = rec != null ? rec.optJSONArray("results") : null;
+                if (ra != null) {
+                    for (int i = 0; i < ra.length() && recs.size() < 10; i++) {
+                        JSONObject rj = ra.getJSONObject(i);
+                        String rt = str(rj, "media_type");
+                        Item ri = parseItem(rj, rt.isEmpty() ? it.type : rt);
+                        if (ri != null) recs.add(ri);
                     }
                 }
 
-                final String genreText = TextUtils.join(", ", g) + (length.isEmpty() ? "" : (g.isEmpty() ? "" : "   " + DOT + "   ") + length);
-                final String overviewText = ov.isEmpty() ? "No description available." : ov;
+                final String genreText = TextUtils.join(", ", g)
+                        + (length.isEmpty() ? "" : (g.isEmpty() ? "" : SEP) + length);
+                final String overviewText = ov.isEmpty()
+                        ? (it.overview.isEmpty() ? "No description available." : it.overview) : ov;
                 final String castText = names.isEmpty() ? "" : "Starring " + TextUtils.join(", ", names);
+                final String metaText = meta(it) + (age.isEmpty() ? "" : SEP + age);
                 final String foundKey = key;
+                if (key != null) trailerCache.put(it.key(), key);
+
                 runOnUiThread(() -> {
+                    metaLine.setText(metaText);
                     genres.setText(genreText);
                     overview.setText(overviewText);
                     cast.setText(castText);
                     trailerKey[0] = foundKey;
-                    trailerBtn.setText(foundKey != null ? "\u25B6  Watch trailer" : "No trailer available");
+                    trailerBtn.setText(foundKey != null ? "\u25B6  Trailer" : "No trailer available");
+                    if (!recs.isEmpty()) {
+                        moreHeader.setVisibility(View.VISIBLE);
+                        for (final Item r : recs) {
+                            View p = buildPoster(r, 64, 96, false, () -> {
+                                dialog.dismiss();
+                                openInfo(r);
+                            });
+                            moreBand.addView(p, size(64, 96, 6));
+                        }
+                    }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
-                    overview.setText("Couldn't load details. Check the internet connection.");
+                    overview.setText(it.overview.isEmpty()
+                            ? "Couldn't load details. Check the internet connection." : it.overview);
                     trailerBtn.setText("No trailer available");
                 });
             }
         }).start();
     }
 
-    private TextView pillButton(String label, final Runnable onClick) {
+    private static String pickTrailer(JSONArray va) {
+        if (va == null) return null;
+        try {
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < va.length(); i++) {
+                    JSONObject v = va.getJSONObject(i);
+                    if (!"YouTube".equals(str(v, "site"))) continue;
+                    String vt = str(v, "type");
+                    boolean good = pass == 0 ? "Trailer".equals(vt) : ("Teaser".equals(vt) || "Trailer".equals(vt));
+                    if (good) {
+                        String k = str(v, "key");
+                        if (!k.isEmpty()) return k;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static String ageRating(JSONObject d, String type) {
+        try {
+            String us = "";
+            if (type.equals("movie")) {
+                JSONObject rd = d.optJSONObject("release_dates");
+                JSONArray arr = rd != null ? rd.optJSONArray("results") : null;
+                if (arr == null) return "";
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject c = arr.getJSONObject(i);
+                    String country = str(c, "iso_3166_1");
+                    JSONArray dates = c.optJSONArray("release_dates");
+                    if (dates == null) continue;
+                    for (int k = 0; k < dates.length(); k++) {
+                        String cert = str(dates.getJSONObject(k), "certification");
+                        if (cert.isEmpty()) continue;
+                        if ("GB".equals(country)) return cert;
+                        if ("US".equals(country) && us.isEmpty()) us = cert;
+                    }
+                }
+            } else {
+                JSONObject cr = d.optJSONObject("content_ratings");
+                JSONArray arr = cr != null ? cr.optJSONArray("results") : null;
+                if (arr == null) return "";
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject c = arr.getJSONObject(i);
+                    String country = str(c, "iso_3166_1");
+                    String rating = str(c, "rating");
+                    if (rating.isEmpty()) continue;
+                    if ("GB".equals(country)) return rating;
+                    if ("US".equals(country) && us.isEmpty()) us = rating;
+                }
+            }
+            return us;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void playTrailerFor(final Item it) {
+        if (it == null) return;
+        String cached = trailerCache.get(it.key());
+        if (cached != null) {
+            playTrailer(cached);
+            return;
+        }
+        new Thread(() -> {
+            String key = null;
+            try {
+                JSONObject d = new JSONObject(tmdbGet("/" + it.type + "/" + it.id + "/videos?language=en-US"));
+                key = pickTrailer(d.optJSONArray("results"));
+            } catch (Exception ignored) {
+            }
+            final String k = key;
+            runOnUiThread(() -> {
+                if (k != null) {
+                    trailerCache.put(it.key(), k);
+                    playTrailer(k);
+                } else {
+                    Toast.makeText(this, "No trailer available for this one.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }).start();
+    }
+
+    private TextView pillButton(String label, final Runnable onClick, final Runnable onFocus) {
         final TextView b = new TextView(this);
         b.setText(label);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -1281,6 +1839,7 @@ public class MainActivity extends Activity {
             bg.setColor(f ? 0xFFFFFFFF : 0x26FFFFFF);
             b.setTextColor(f ? DARK : 0xFFFFFFFF);
             v.animate().scaleX(f ? 1.06f : 1f).scaleY(f ? 1.06f : 1f).setDuration(120).start();
+            if (f && onFocus != null) onFocus.run();
         });
         b.setOnClickListener(v -> onClick.run());
         return b;
