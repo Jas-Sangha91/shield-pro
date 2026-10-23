@@ -176,6 +176,7 @@ public class MainActivity extends Activity {
 
     private ScrollView scroll;
     private LinearLayout content;
+    private LinearLayout weatherRow;
     private TextView titleView, metaView, hintView, weatherView, placeView, vpnCityView;
     private TextView tabHome, tabDiscover;
     private FrameLayout searchBtn, vpnBtn, cogBtn;
@@ -383,7 +384,7 @@ public class MainActivity extends Activity {
         header.setClipToPadding(false);
         column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
 
-        // Top left: search, tabs, then weather
+        // Top left: search, tabs, then weather (Home only)
         LinearLayout topLeft = new LinearLayout(this);
         topLeft.setOrientation(LinearLayout.VERTICAL);
         topLeft.setClipChildren(false);
@@ -404,7 +405,7 @@ public class MainActivity extends Activity {
         tabs.addView(tabDiscover, new LinearLayout.LayoutParams(WRAP, WRAP));
         topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
 
-        LinearLayout weatherRow = new LinearLayout(this);
+        weatherRow = new LinearLayout(this);
         weatherRow.setOrientation(LinearLayout.HORIZONTAL);
         weatherRow.setGravity(Gravity.CENTER_VERTICAL);
         weatherRow.setPadding(dp(6), dp(12), 0, 0);
@@ -716,6 +717,9 @@ public class MainActivity extends Activity {
         hintView.setVisibility((arranging || movingPkg != null) ? View.VISIBLE : View.GONE);
         metaView.setText("");
         metaView.setVisibility(onDiscover ? View.VISIBLE : View.GONE);
+
+        // Weather shows on Home only, fading out on Discover
+        if (weatherRow != null) weatherRow.animate().alpha(onDiscover ? 0f : 1f).setDuration(250).start();
 
         if (onDiscover) {
             renderDiscover();
