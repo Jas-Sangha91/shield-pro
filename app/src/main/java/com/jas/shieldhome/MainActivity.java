@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
 
     private ScrollView scroll;
     private LinearLayout content;
-    private TextView titleView, hintView, weatherView, placeView, creditView;
+    private TextView titleView, hintView, weatherView, placeView;
 
     private final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
     private final List<String> dock = new ArrayList<>();
@@ -212,10 +212,7 @@ public class MainActivity extends Activity {
         placeView = new TextView(this);
         style(placeView, 12, false, 0x99FFFFFF);
 
-        creditView = new TextView(this);
-        style(creditView, 9, false, 0x66FFFFFF);
-
-        TextView[] lines = {time, date, weatherView, placeView, creditView};
+        TextView[] lines = {time, date, weatherView, placeView};
         for (TextView tv : lines) {
             tv.setGravity(Gravity.END);
             info.addView(tv);
@@ -577,7 +574,6 @@ public class MainActivity extends Activity {
         } else {
             weatherView.setText("");
             placeView.setText("Set weather in Customise");
-            creditView.setText("");
         }
     }
 
@@ -592,6 +588,7 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Weather location")
+                .setMessage("Weather data by Open-Meteo.com")
                 .setView(box)
                 .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim()))
                 .setNeutralButton("Remove weather", (d, w) -> {
@@ -678,7 +675,6 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     weatherView.setText(symbol(code) + "  " + now + DEG + "    H " + hi + DEG + "  L " + lo + DEG);
                     placeView.setText(prefs.getString("wx_name", "") + "  \u00B7  " + describe(code));
-                    creditView.setText("Weather data by Open-Meteo.com");
                 });
             } catch (Exception ex) {
                 lastWeatherFetch = 0; // try again on the next check
