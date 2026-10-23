@@ -962,3 +962,43 @@ public class MainActivity extends Activity {
                     if (which == 0) {
                         startSafe(new Intent(Settings.ACTION_SETTINGS));
                     } else if (which == 1) {
+                        weather.askClockZone();
+                    } else if (which == 2) {
+                        weather.askWeatherPlace();
+                    }
+                })
+                .show();
+    }
+
+    // ---------- Small helpers ----------
+
+    void launch(String pkg) {
+        Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
+        if (i == null) i = pm.getLaunchIntentForPackage(pkg);
+        if (i != null) startSafe(i);
+    }
+
+    void startSafe(Intent i) {
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(i);
+        } catch (Exception ignored) {
+        }
+    }
+
+    LinearLayout.LayoutParams size(int w, int h, int gap) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(w), dp(h));
+        lp.setMargins(dp(gap), dp(gap), dp(gap), dp(gap));
+        return lp;
+    }
+
+    void style(TextView tv, int sp, boolean bold, int color) {
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        tv.setTextColor(color);
+        tv.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL));
+    }
+
+    int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+}
