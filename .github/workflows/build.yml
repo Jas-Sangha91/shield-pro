@@ -32,12 +32,12 @@ jobs:
         run: gradle assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk shield-home.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk sangha-home.apk
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: Shield Home build ${{ github.run_number }}
-          files: shield-home.apk
+          name: Sangha Home build ${{ github.run_number }}
+          files: sangha-home.apk
           make_latest: true
