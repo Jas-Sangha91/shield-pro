@@ -699,7 +699,7 @@ public class MainActivity extends Activity {
         hintView.setText(movingPkg != null
                 ? "Moving: use the arrows, then OK to drop it. Back cancels."
                 : "Arrange mode: press OK on an app to move, group, dock or hide it. Press Back when finished.");
-        hintView.setVisibility(arranging ? View.VISIBLE : View.GONE);
+        hintView.setVisibility((arranging || movingPkg != null) ? View.VISIBLE : View.GONE);
         metaView.setText("");
         metaView.setVisibility(onDiscover ? View.VISIBLE : View.GONE);
 
@@ -823,6 +823,10 @@ public class MainActivity extends Activity {
 
     private View appTile(final String pkg) {
         View t = buildAppTile(pkg, () -> onAppClicked(pkg));
+        t.setOnLongClickListener(v -> {
+            showAppMenu(pkg, !arranging);
+            return true;
+        });
         tileByPkg.put(pkg, t);
         if (firstTile == null) firstTile = t;
         return register(t);
@@ -885,10 +889,16 @@ public class MainActivity extends Activity {
         final AlertDialog[] holder = new AlertDialog[1];
         List<View> views = new ArrayList<>();
         for (final String p : pkgs) {
-            views.add(buildAppTile(p, () -> {
+            View t = buildAppTile(p, () -> {
                 if (holder[0] != null) holder[0].dismiss();
                 onAppClicked(p);
-            }));
+            });
+            t.setOnLongClickListener(v -> {
+                if (holder[0] != null) holder[0].dismiss();
+                showAppMenu(p, !arranging);
+                return true;
+            });
+            views.add(t);
         }
         addRows(box, views, FOLDER_COLUMNS, FOLDER_W, FOLDER_H, GRID_GAP);
 
@@ -1732,7 +1742,30 @@ public class MainActivity extends Activity {
             }
         });
         t.setOnClickListener(v -> onClick.run());
+        t.setOnLongClickListener(v -> {
+            showPosterMenu(it);
+            return true;
+        });
         return t;
+    }
+
+    private void showPosterMenu(final Item it) {
+        final boolean inList = isInMyList(it);
+        String[] opts = {"More info", "\u25B6  Trailer",
+                inList ? "Remove from My list" : "+  Add to My list", "Cancel"};
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(it.title)
+                .setItems(opts, (d, which) -> {
+                    if (which == 0) {
+                        openInfo(it);
+                    } else if (which == 1) {
+                        playTrailerFor(it);
+                    } else if (which == 2) {
+                        toggleMyList(it);
+                        updateSpotListButton();
+                    }
+                })
+                .show();
     }
 
     private Bitmap fetchBitmap(String url) {
@@ -2379,7 +2412,7 @@ public class MainActivity extends Activity {
     }
 
     private void onAppClicked(String pkg) {
-        if (arranging) showAppMenu(pkg);
+        if (arranging) showAppMenu(pkg, false);
         else launch(pkg);
     }
 
@@ -2389,11 +2422,12 @@ public class MainActivity extends Activity {
         render(null);
     }
 
-    private void showAppMenu(final String pkg) {
+    private void showAppMenu(final String pkg, boolean includeOpen) {
         final boolean isDock = dock.contains(pkg);
         final boolean isHidden = hidden.contains(pkg);
         final boolean inToolsFolder = !isDock && !isHidden && TOOLS.equals(groupOf(pkg));
         final List<String> opts = new ArrayList<>();
+        if (includeOpen) opts.add("Open");
         if (!isHidden && !inToolsFolder) opts.add("Move");
         if (!isHidden && !isDock) opts.add("Move to group");
         opts.add(isDock ? "Remove from dock" : "Add to dock");
@@ -2405,7 +2439,9 @@ public class MainActivity extends Activity {
                 .setTitle(label)
                 .setItems(opts.toArray(new String[0]), (d, which) -> {
                     String o = opts.get(which);
-                    if (o.equals("Move")) {
+                    if (o.equals("Open")) {
+                        launch(pkg);
+                    } else if (o.equals("Move")) {
                         startMove(pkg);
                     } else if (o.equals("Move to group")) {
                         chooseGroup(pkg);
