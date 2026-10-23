@@ -89,6 +89,9 @@ public class MainActivity extends Activity {
     private static final String VPN_APP = "com.surfshark.vpnclient.android";
     private static final String YOUTUBE_APP = "com.google.android.youtube.tv";
 
+    // Pages (tabs in the top bar)
+    private static final int PAGE_HOME = 0, PAGE_APPS = 1, PAGE_DISCOVER = 2;
+
     // Groups (sections)
     private static final String WATCH = "watch", PLAY = "play", TOOLS = "tools";
     private static final String[] GROUP_ORDER = {WATCH, PLAY, TOOLS};
@@ -196,7 +199,7 @@ public class MainActivity extends Activity {
     private TextView titleView, metaView, hintView, weatherView, placeView, vpnCityView;
     private TextClock timeClock, dateClock;
     private TextView clockPlaceView;
-    private TextView tabHome, tabDiscover;
+    private TextView tabHome, tabApps, tabDiscover;
     private FrameLayout searchBtn, vpnBtn, cogBtn;
     private GradientDrawable vpnDotBg;
     private GradientDrawable baseBg, glow;
@@ -206,7 +209,7 @@ public class MainActivity extends Activity {
     private final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
     private final List<String> dock = new ArrayList<>();
     private final List<String> grid = new ArrayList<>();   // app packages and folder keys, in order
-    private final List<String> hidden = new ArrayList<>();
+    private final List<String> hidden = new ArrayList<>(); // apps that are not on Home (still listed in Apps)
     private final Map<String, Folder> folders = new LinkedHashMap<>();
     private final Map<String, View> tileByPkg = new HashMap<>();
     private final Map<String, Integer> colorByPkg = new HashMap<>();
@@ -215,7 +218,7 @@ public class MainActivity extends Activity {
     private View firstTile;
 
     private String installedSignature = "";
-    private boolean onDiscover = false;
+    private int page = PAGE_HOME;
     private boolean arranging = false;
     private String movingPkg = null;
     private boolean swallowBackUp = false;
@@ -283,7 +286,7 @@ public class MainActivity extends Activity {
     private final Runnable spotTick = new Runnable() {
         @Override
         public void run() {
-            if (onDiscover && spotTitle != null && !spotlightFocused() && hasWindowFocus()) {
+            if (page == PAGE_DISCOVER && spotTitle != null && !spotlightFocused() && hasWindowFocus()) {
                 showSpot(spotIndex + 1, true);
             }
             handler.postDelayed(this, SPOT_EVERY_MS);
@@ -312,7 +315,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(vpnTick);
         handler.post(vpnTick);
         handler.removeCallbacks(spotTick);
-        if (onDiscover && spotTitle != null) handler.postDelayed(spotTick, SPOT_EVERY_MS);
+        if (page == PAGE_DISCOVER && spotTitle != null) handler.postDelayed(spotTick, SPOT_EVERY_MS);
         resetIdle();
     }
 
@@ -330,9 +333,9 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (movingPkg != null) finishMove(false);
-        if (arranging || onDiscover) {
+        if (arranging || page != PAGE_HOME) {
             arranging = false;
-            onDiscover = false;
+            page = PAGE_HOME;
             styleTabs();
             render(null);
         }
@@ -344,8 +347,8 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         if (arranging) {
             exitArrange();
-        } else if (onDiscover) {
-            showPage(false);
+        } else if (page != PAGE_HOME) {
+            showPage(PAGE_HOME);
             if (tabHome != null) tabHome.requestFocus();
         }
         // Otherwise this is the home screen, so Back does nothing.
@@ -416,11 +419,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(30), dp(30));
         slp.rightMargin = dp(12);
         tabs.addView(searchBtn, slp);
-        tabHome = makeTab("Home", false);
-        tabDiscover = makeTab("Discover", true);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        tlp.rightMargin = dp(8);
-        tabs.addView(tabHome, tlp);
+        tabHome = makeTab("Home", PAGE_HOME);
+        tabApps = makeTab("Apps", PAGE_APPS);
+        tabDiscover = makeTab("Discover", PAGE_DISCOVER);
+        LinearLayout.LayoutParams tlp1 = new LinearLayout.LayoutParams(WRAP, WRAP);
+        tlp1.rightMargin = dp(8);
+        tabs.addView(tabHome, tlp1);
+        LinearLayout.LayoutParams tlp2 = new LinearLayout.LayoutParams(WRAP, WRAP);
+        tlp2.rightMargin = dp(8);
+        tabs.addView(tabApps, tlp2);
         tabs.addView(tabDiscover, new LinearLayout.LayoutParams(WRAP, WRAP));
         topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
 
@@ -439,7 +446,7 @@ public class MainActivity extends Activity {
 
         header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
-        // Bottom left: selected item name, details line (Discover) and arrange hint.
+        // Bottom left: selected item name, details line (Apps and Discover) and moving hint.
         // Fixed widths so long names fit and only very long ones get "..." at the end.
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -451,6 +458,7 @@ public class MainActivity extends Activity {
         metaView = new TextView(this);
         style(metaView, 16, false, SOFT_TEXT);
         metaView.setSingleLine(true);
+        metaView.setEllipsize(TextUtils.TruncateAt.END);
         metaView.setVisibility(View.GONE);
         hintView = new TextView(this);
         style(hintView, 16, false, 0xFFFFD54F);
@@ -548,7 +556,7 @@ public class MainActivity extends Activity {
         applyClockZone();
     }
 
-    private TextView makeTab(final String label, final boolean discover) {
+    private TextView makeTab(final String label, final int target) {
         final TextView tv = new TextView(this);
         tv.setText(label);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
@@ -564,14 +572,15 @@ public class MainActivity extends Activity {
                 setGlow(NEUTRAL_GLOW);
             }
         });
-        tv.setOnClickListener(v -> showPage(discover));
+        tv.setOnClickListener(v -> showPage(target));
         return tv;
     }
 
     private void styleTabs() {
-        if (tabHome == null || tabDiscover == null) return;
-        styleTab(tabHome, !onDiscover);
-        styleTab(tabDiscover, onDiscover);
+        if (tabHome == null || tabApps == null || tabDiscover == null) return;
+        styleTab(tabHome, page == PAGE_HOME);
+        styleTab(tabApps, page == PAGE_APPS);
+        styleTab(tabDiscover, page == PAGE_DISCOVER);
     }
 
     private void styleTab(TextView tv, boolean active) {
@@ -586,9 +595,9 @@ public class MainActivity extends Activity {
         tv.setTypeface(Typeface.create("sans-serif", (active || focused) ? Typeface.BOLD : Typeface.NORMAL));
     }
 
-    private void showPage(boolean discover) {
-        if (onDiscover == discover) return;
-        onDiscover = discover;
+    private void showPage(int target) {
+        if (page == target) return;
+        page = target;
         arranging = false;
         movingPkg = null;
         styleTabs();
@@ -718,7 +727,7 @@ public class MainActivity extends Activity {
         colorByPkg.clear();
         for (String p : names) installed.put(p, found.get(p));
         loadLayout();
-        render(null, !onDiscover);
+        render(null, page == PAGE_HOME);
     }
 
     private void render(String focusPkg) {
@@ -745,16 +754,30 @@ public class MainActivity extends Activity {
                 : "Arrange mode: press OK on an app or folder to change it. Press Back when finished.");
         hintView.setVisibility((arranging || movingPkg != null) ? View.VISIBLE : View.GONE);
         metaView.setText("");
-        metaView.setVisibility(onDiscover ? View.VISIBLE : View.GONE);
+        metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather shows on Home only, fading out on Discover
-        if (weatherRow != null) weatherRow.animate().alpha(onDiscover ? 0f : 1f).setDuration(250).start();
+        // Weather shows on Home only
+        if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
 
-        if (onDiscover) {
+        if (page == PAGE_DISCOVER) {
             renderDiscover();
             return;
         }
 
+        if (page == PAGE_APPS) {
+            renderApps();
+        } else {
+            renderHome();
+        }
+
+        if (takeFocus) {
+            View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
+            if (target == null) target = firstTile;
+            if (target != null) target.requestFocus();
+        }
+    }
+
+    private void renderHome() {
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
         if (!dock.isEmpty()) {
             LinearLayout band = new LinearLayout(this);
@@ -788,26 +811,147 @@ public class MainActivity extends Activity {
         addGroupSection("Watch", WATCH);
         addGroupSection("Play", PLAY);
         addGroupSection("Tools", TOOLS);
-
-        // Hidden apps
-        if (!hidden.isEmpty()) {
-            addHeader("Hidden apps");
-            List<View> hiddenTiles = new ArrayList<>();
-            for (String p : hidden) {
-                View t = appTile(p);
-                t.setAlpha(0.5f);
-                baseAlpha.put(t, 0.5f);
-                hiddenTiles.add(t);
-            }
-            addRows(content, hiddenTiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
-        }
-
-        if (takeFocus) {
-            View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
-            if (target == null) target = firstTile;
-            if (target != null) target.requestFocus();
-        }
     }
+
+    // ---------- Apps page ----------
+
+    private void renderApps() {
+        addHeader("All apps (" + installed.size() + ")");
+        TextView hint = new TextView(this);
+        style(hint, 14, false, SOFT_TEXT);
+        hint.setText("A tick means the app is on Home. Hold OK on an app to add it to Home, add it to the dock, or remove it from Home.");
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        hlp.leftMargin = dp(12);
+        hlp.bottomMargin = dp(6);
+        content.addView(hint, hlp);
+
+        List<View> tiles = new ArrayList<>();
+        for (String pkg : installed.keySet()) tiles.add(appsPageTile(pkg));
+        addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
+    }
+
+    private View appsPageTile(final String pkg) {
+        FrameLayout t = (FrameLayout) buildAppTile(pkg, () -> launch(pkg));
+
+        if (!hidden.contains(pkg)) {
+            TextView tick = new TextView(this);
+            tick.setText("\u2713");
+            style(tick, 11, true, DARK);
+            tick.setGravity(Gravity.CENTER);
+            GradientDrawable tb = new GradientDrawable();
+            tb.setShape(GradientDrawable.OVAL);
+            tb.setColor(VPN_ON);
+            tick.setBackground(tb);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.TOP | Gravity.END);
+            lp.setMargins(0, dp(5), dp(5), 0);
+            t.addView(tick, lp);
+        }
+
+        final View.OnFocusChangeListener base = t.getOnFocusChangeListener();
+        t.setOnFocusChangeListener((v, f) -> {
+            if (base != null) base.onFocusChange(v, f);
+            if (f) metaView.setText(homeStatus(pkg));
+        });
+        t.setOnLongClickListener(v -> {
+            showAppsPageMenu(pkg);
+            return true;
+        });
+        tileByPkg.put(pkg, t);
+        if (firstTile == null) firstTile = t;
+        return register(t);
+    }
+
+    private String homeStatus(String pkg) {
+        if (hidden.contains(pkg)) return "Not on Home";
+        if (dock.contains(pkg)) return "On Home" + SEP + "Dock";
+        Folder f = folderOf(pkg);
+        if (f != null) return "On Home" + SEP + groupName(f.group) + SEP + f.name + " folder";
+        return "On Home" + SEP + groupName(groupOf(pkg));
+    }
+
+    private void showAppsPageMenu(final String pkg) {
+        final boolean onHome = !hidden.contains(pkg);
+        final boolean isDock = dock.contains(pkg);
+        final List<String> opts = new ArrayList<>();
+        opts.add("Open");
+        if (!onHome) opts.add("Add to Home");
+        opts.add(isDock ? "Remove from dock" : "Add to dock");
+        if (onHome) opts.add("Remove from Home");
+        opts.add("Cancel");
+        String label = installed.get(pkg).loadLabel(pm).toString();
+
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(label)
+                .setItems(opts.toArray(new String[0]), (d, which) -> {
+                    String o = opts.get(which);
+                    if (o.equals("Open")) {
+                        launch(pkg);
+                    } else if (o.equals("Add to Home")) {
+                        chooseHomeSpot(pkg);
+                    } else if (o.equals("Add to dock")) {
+                        addToDock(pkg);
+                    } else if (o.equals("Remove from dock")) {
+                        dock.remove(pkg);
+                        grid.add(0, pkg);
+                        saveAndRender(pkg);
+                    } else if (o.equals("Remove from Home")) {
+                        removeFromHome(pkg);
+                    }
+                })
+                .show();
+    }
+
+    private void chooseHomeSpot(final String pkg) {
+        final List<String> names = new ArrayList<>();
+        final List<Object> targets = new ArrayList<>();
+        for (String g : GROUP_ORDER) {
+            names.add(groupName(g));
+            targets.add(g);
+        }
+        for (Folder f : folders.values()) {
+            names.add(f.name + " folder   " + DOT + "   " + groupName(f.group));
+            targets.add(f);
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Add to Home")
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    Object t = targets.get(which);
+                    hidden.remove(pkg);
+                    if (t instanceof Folder) {
+                        Folder f = (Folder) t;
+                        if (!f.apps.contains(pkg)) f.apps.add(pkg);
+                        setGroupPref(pkg, f.group);
+                        Toast.makeText(this, "Added to Home in " + f.name, Toast.LENGTH_SHORT).show();
+                    } else {
+                        String g = (String) t;
+                        setGroupPref(pkg, g);
+                        if (!grid.contains(pkg)) grid.add(pkg);
+                        Toast.makeText(this, "Added to Home in " + groupName(g), Toast.LENGTH_SHORT).show();
+                    }
+                    saveAndRender(pkg);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void addToDock(String pkg) {
+        removeFromFolder(pkg);
+        grid.remove(pkg);
+        hidden.remove(pkg);
+        if (!dock.contains(pkg)) dock.add(pkg);
+        saveAndRender(pkg);
+    }
+
+    private void removeFromHome(String pkg) {
+        removeFromFolder(pkg);
+        dock.remove(pkg);
+        grid.remove(pkg);
+        if (!hidden.contains(pkg)) hidden.add(pkg);
+        Toast.makeText(this, "Removed from Home. It's still in Apps.", Toast.LENGTH_SHORT).show();
+        saveAndRender(pkg);
+    }
+
+    // ---------- Home sections ----------
 
     private void addGroupSection(String title, String group) {
         List<String> keys = keysInGroup(group);
@@ -1400,7 +1544,7 @@ public class MainActivity extends Activity {
                 } else {
                     discoverError = true;
                 }
-                if (onDiscover) render(null, false);
+                if (page == PAGE_DISCOVER) render(null, false);
             });
         }).start();
     }
@@ -2656,7 +2800,7 @@ public class MainActivity extends Activity {
         saveAndRender(first);
     }
 
-    // ---------- Arranging ----------
+    // ---------- Layout ----------
 
     private void loadLayout() {
         dock.clear();
@@ -2669,7 +2813,7 @@ public class MainActivity extends Activity {
             if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p)) hidden.add(p);
         }
 
-        // Folders keep only installed apps that aren't docked, hidden or already in another folder
+        // Folders keep only installed apps that aren't docked, off Home or already in another folder
         loadFolders();
         Set<String> inFolder = new HashSet<>();
         for (Folder f : folders.values()) {
@@ -2713,6 +2857,7 @@ public class MainActivity extends Activity {
             String k = FOLDER_PREFIX + f.id;
             if (!f.apps.isEmpty() && !grid.contains(k)) grid.add(k);
         }
+        // Anything not placed yet (including newly installed apps) goes onto Home in its usual section
         for (String p : installed.keySet()) {
             if (!dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p) && !grid.contains(p)) grid.add(p);
         }
@@ -2747,16 +2892,15 @@ public class MainActivity extends Activity {
 
     private void showAppMenu(final String pkg, boolean includeOpen) {
         final boolean isDock = dock.contains(pkg);
-        final boolean isHidden = hidden.contains(pkg);
         final Folder inFolder = folderOf(pkg);
         final List<String> opts = new ArrayList<>();
         if (includeOpen) opts.add("Open");
-        if (!isHidden && inFolder == null) opts.add("Move");
-        if (!isHidden && !isDock && inFolder == null) opts.add("Move to group");
-        if (!isHidden && !isDock) opts.add(inFolder == null ? "Add to folder" : "Move to another folder");
+        if (inFolder == null) opts.add("Move");
+        if (!isDock && inFolder == null) opts.add("Move to group");
+        if (!isDock) opts.add(inFolder == null ? "Add to folder" : "Move to another folder");
         if (inFolder != null) opts.add("Take out of folder");
         opts.add(isDock ? "Remove from dock" : "Add to dock");
-        opts.add(isHidden ? "Unhide" : "Hide");
+        opts.add("Remove from Home");
         opts.add("Cancel");
         String label = installed.get(pkg).loadLabel(pm).toString();
 
@@ -2776,25 +2920,13 @@ public class MainActivity extends Activity {
                         takeOutOfFolder(pkg);
                         saveAndRender(pkg);
                     } else if (o.equals("Add to dock")) {
-                        removeFromFolder(pkg);
-                        grid.remove(pkg);
-                        hidden.remove(pkg);
-                        dock.add(pkg);
-                        saveAndRender(pkg);
+                        addToDock(pkg);
                     } else if (o.equals("Remove from dock")) {
                         dock.remove(pkg);
                         grid.add(0, pkg);
                         saveAndRender(pkg);
-                    } else if (o.equals("Hide")) {
-                        removeFromFolder(pkg);
-                        dock.remove(pkg);
-                        grid.remove(pkg);
-                        hidden.add(pkg);
-                        saveAndRender(pkg);
-                    } else if (o.equals("Unhide")) {
-                        hidden.remove(pkg);
-                        grid.add(pkg);
-                        saveAndRender(pkg);
+                    } else if (o.equals("Remove from Home")) {
+                        removeFromHome(pkg);
                     }
                 })
                 .show();
