@@ -11,12 +11,9 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.ShapeDrawable;
-import android.graphics.drawable.shapes.PathShape;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -57,18 +54,20 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public class MainActivity extends Activity {
 
-    // Dock apps used the very first time only. After that, use Customise on the TV.
+    // Dock apps used the very first time only. After that, use the settings cog on the TV.
     private static final String[] DEFAULT_DOCK = {
             "com.netflix.ninja",
             "com.amazon.amazonvideo.livingroom",
             "com.disney.disneyplus",
             "com.google.android.youtube.tv",
-            "ar.tvplayer.tv",
-            "org.xbmc.kodi"
+            "ar.tvplayer.tv"
     };
+
+    private static final String VPN_APP = "com.surfshark.vpnclient.android";
 
     // Groups
     private static final String WATCH = "watch", PLAY = "play", TOOLS = "tools";
@@ -108,6 +107,8 @@ public class MainActivity extends Activity {
     private static final int VPN_ON = 0xFF7BD88F;
     private static final int VPN_OFF = 0xFFFFB74D;
     private static final int SOFT_TEXT = 0xB0FFFFFF;
+    private static final int ICON_IDLE = 0xFFC9CDD6;
+    private static final int DARK = 0xFF141A26;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
     private static final String DEG = "\u00B0";
@@ -120,7 +121,10 @@ public class MainActivity extends Activity {
 
     private ScrollView scroll;
     private LinearLayout content;
-    private TextView titleView, hintView, weatherView, placeView, vpnView;
+    private TextView titleView, hintView, weatherView, placeView;
+    private TextView tabHome, tabDiscover;
+    private FrameLayout vpnBtn, cogBtn;
+    private GradientDrawable vpnDotBg;
     private GradientDrawable baseBg, glow;
     private int glowColor = 0x00000000;
     private ValueAnimator glowAnim;
@@ -136,6 +140,7 @@ public class MainActivity extends Activity {
     private View firstTile;
 
     private String installedSignature = "";
+    private boolean onDiscover = false;
     private boolean arranging = false;
     private String movingPkg = null;
     private boolean swallowBackUp = false;
@@ -209,9 +214,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (arranging || movingPkg != null) {
-            if (movingPkg != null) finishMove(false);
+        if (movingPkg != null) finishMove(false);
+        if (arranging || onDiscover) {
             arranging = false;
+            onDiscover = false;
+            styleTabs();
             render(null);
         }
         if (scroll != null) scroll.smoothScrollTo(0, 0);
@@ -220,7 +227,12 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (arranging) exitArrange();
+        if (arranging) {
+            exitArrange();
+        } else if (onDiscover) {
+            showPage(false);
+            if (tabHome != null) tabHome.requestFocus();
+        }
         // Otherwise this is the home screen, so Back does nothing.
     }
 
@@ -267,35 +279,45 @@ public class MainActivity extends Activity {
 
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
+        column.setClipChildren(false);
         root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         FrameLayout header = new FrameLayout(this);
-        header.setPadding(dp(40), dp(26), dp(48), dp(4));
+        header.setPadding(dp(40), dp(22), dp(48), dp(4));
+        header.setClipChildren(false);
+        header.setClipToPadding(false);
         column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
 
-        // Top left: weather and VPN status row
-        LinearLayout status = new LinearLayout(this);
-        status.setOrientation(LinearLayout.HORIZONTAL);
-        status.setGravity(Gravity.CENTER_VERTICAL);
+        // Top left: tabs, then weather
+        LinearLayout topLeft = new LinearLayout(this);
+        topLeft.setOrientation(LinearLayout.VERTICAL);
 
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabHome = makeTab("Home", false);
+        tabDiscover = makeTab("Discover", true);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        tlp.rightMargin = dp(8);
+        tabs.addView(tabHome, tlp);
+        tabs.addView(tabDiscover);
+        topLeft.addView(tabs);
+
+        LinearLayout weatherRow = new LinearLayout(this);
+        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
+        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
+        weatherRow.setPadding(dp(6), dp(12), 0, 0);
         weatherView = new TextView(this);
-        style(weatherView, 20, false, 0xFFFFFFFF);
-
+        style(weatherView, 18, false, 0xFFFFFFFF);
         placeView = new TextView(this);
         style(placeView, 16, false, SOFT_TEXT);
         placeView.setPadding(dp(10), 0, 0, 0);
+        weatherRow.addView(weatherView);
+        weatherRow.addView(placeView);
+        topLeft.addView(weatherRow);
 
-        vpnView = new TextView(this);
-        style(vpnView, 16, false, SOFT_TEXT);
-        vpnView.setPadding(dp(28), 0, 0, 0);
-        vpnView.setCompoundDrawablePadding(dp(8));
+        header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
-        status.addView(weatherView);
-        status.addView(placeView);
-        status.addView(vpnView);
-        header.addView(status, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
-
-        // Bottom left: selected app name (and arrange hint)
+        // Bottom left: selected item name (and arrange hint)
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         titleView = new TextView(this);
@@ -309,11 +331,34 @@ public class MainActivity extends Activity {
         left.addView(hintView);
         header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
-        // Top right: large, light clock and date
+        // Top right: VPN button, settings cog, clock
+        LinearLayout right = new LinearLayout(this);
+        right.setOrientation(LinearLayout.HORIZONTAL);
+        right.setClipChildren(false);
+
+        vpnBtn = roundButton(R.drawable.ic_shield, this::vpnTitle, this::openVpnApp);
+        vpnDotBg = new GradientDrawable();
+        vpnDotBg.setShape(GradientDrawable.OVAL);
+        vpnDotBg.setColor(VPN_OFF);
+        vpnDotBg.setStroke(dp(2), DARK);
+        View vpnDot = new View(this);
+        vpnDot.setBackground(vpnDotBg);
+        vpnBtn.addView(vpnDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
+
+        cogBtn = roundButton(R.drawable.ic_cog, () -> "Settings", this::openSettingsMenu);
+
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        blp.topMargin = dp(8);
+        blp.rightMargin = dp(10);
+        right.addView(vpnBtn, blp);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        clp.topMargin = dp(8);
+        clp.rightMargin = dp(18);
+        right.addView(cogBtn, clp);
+
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
         clock.setGravity(Gravity.END);
-
         TextClock time = new TextClock(this);
         time.setFormat12Hour("HH:mm");
         time.setFormat24Hour("HH:mm");
@@ -322,17 +367,17 @@ public class MainActivity extends Activity {
         time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         time.setGravity(Gravity.END);
         time.setIncludeFontPadding(false);
-
         TextClock date = new TextClock(this);
         date.setFormat12Hour("EEEE d MMMM");
         date.setFormat24Hour("EEEE d MMMM");
         style(date, 18, false, SOFT_TEXT);
         date.setGravity(Gravity.END);
         date.setPadding(0, dp(4), 0, 0);
-
         clock.addView(time);
         clock.addView(date);
-        header.addView(clock, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
+        right.addView(clock);
+
+        header.addView(right, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
 
         // Scrolling area underneath the header
         scroll = new ScrollView(this);
@@ -349,23 +394,81 @@ public class MainActivity extends Activity {
         column.addView(scroll, new LinearLayout.LayoutParams(MATCH, 0, 1f));
 
         setContentView(root);
+        styleTabs();
         showWeatherPlaceholder();
     }
 
-    private Drawable shieldDrawable(int color) {
-        Path p = new Path();
-        p.moveTo(8f, 0f);
-        p.lineTo(16f, 3f);
-        p.lineTo(16f, 9f);
-        p.quadTo(16f, 15f, 8f, 18f);
-        p.quadTo(0f, 15f, 0f, 9f);
-        p.lineTo(0f, 3f);
-        p.close();
-        ShapeDrawable d = new ShapeDrawable(new PathShape(p, 16f, 18f));
-        d.getPaint().setColor(color);
-        d.setIntrinsicWidth(dp(15));
-        d.setIntrinsicHeight(dp(17));
-        return d;
+    private TextView makeTab(final String label, final boolean discover) {
+        final TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        tv.setPadding(dp(16), dp(5), dp(16), dp(6));
+        tv.setFocusable(true);
+        tv.setClickable(true);
+        tv.setOnFocusChangeListener((v, f) -> {
+            styleTabs();
+            if (f) {
+                titleView.setText(label);
+                setGlow(NEUTRAL_GLOW);
+            }
+        });
+        tv.setOnClickListener(v -> showPage(discover));
+        return tv;
+    }
+
+    private void styleTabs() {
+        if (tabHome == null || tabDiscover == null) return;
+        styleTab(tabHome, !onDiscover);
+        styleTab(tabDiscover, onDiscover);
+    }
+
+    private void styleTab(TextView tv, boolean active) {
+        boolean focused = tv.isFocused();
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(16));
+        if (focused) bg.setColor(0xFFFFFFFF);
+        else if (active) bg.setColor(0x26FFFFFF);
+        else bg.setColor(0x00000000);
+        tv.setBackground(bg);
+        tv.setTextColor(focused ? DARK : (active ? 0xFFFFFFFF : SOFT_TEXT));
+        tv.setTypeface(Typeface.create("sans-serif", (active || focused) ? Typeface.BOLD : Typeface.NORMAL));
+    }
+
+    private void showPage(boolean discover) {
+        if (onDiscover == discover) return;
+        onDiscover = discover;
+        arranging = false;
+        movingPkg = null;
+        styleTabs();
+        render(null, false);
+    }
+
+    private FrameLayout roundButton(int iconRes, final Supplier<String> title, final Runnable onClick) {
+        final FrameLayout b = new FrameLayout(this);
+        b.setFocusable(true);
+        b.setClickable(true);
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(0x14FFFFFF);
+        b.setBackground(bg);
+
+        final Drawable icon = getDrawable(iconRes).mutate();
+        icon.setTint(ICON_IDLE);
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(icon);
+        b.addView(iv, new FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER));
+
+        b.setOnFocusChangeListener((v, f) -> {
+            bg.setColor(f ? 0xFFFFFFFF : 0x14FFFFFF);
+            icon.setTint(f ? DARK : ICON_IDLE);
+            v.animate().scaleX(f ? 1.15f : 1f).scaleY(f ? 1.15f : 1f).setDuration(150).start();
+            if (f) {
+                titleView.setText(title.get());
+                setGlow(NEUTRAL_GLOW);
+            }
+        });
+        b.setOnClickListener(v -> onClick.run());
+        return b;
     }
 
     private static int[] timeOfDayColors() {
@@ -464,6 +567,10 @@ public class MainActivity extends Activity {
     }
 
     private void render(String focusPkg) {
+        render(focusPkg, true);
+    }
+
+    private void render(String focusPkg, boolean takeFocus) {
         content.removeAllViews();
         tileByPkg.clear();
         allTiles.clear();
@@ -475,6 +582,11 @@ public class MainActivity extends Activity {
                 ? "Moving: use the arrows, then OK to drop it. Back cancels."
                 : "Arrange mode: press OK on an app to move, group, dock or hide it. Press Back when finished.");
         hintView.setVisibility(arranging ? View.VISIBLE : View.GONE);
+
+        if (onDiscover) {
+            renderDiscover();
+            return;
+        }
 
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
         if (!dock.isEmpty()) {
@@ -509,16 +621,14 @@ public class MainActivity extends Activity {
         addGroupSection("Watch", WATCH);
         addGroupSection("Play", PLAY);
 
-        // Tools: folder tile, Settings and Customise
-        addHeader("Tools");
-        List<View> tools = new ArrayList<>();
+        // Tools folder
         final List<String> toolPkgs = pkgsInGroup(TOOLS);
-        if (!toolPkgs.isEmpty()) tools.add(register(folderTile(toolPkgs)));
-        tools.add(register(tile("Settings", null, null, false, null,
-                () -> startSafe(new Intent(Settings.ACTION_SETTINGS)))));
-        tools.add(register(tile(arranging ? "Done arranging" : "Customise", null, null, false, null,
-                this::openCustomise)));
-        addRows(content, tools, COLUMNS, GRID_W, GRID_H, GRID_GAP);
+        if (!toolPkgs.isEmpty()) {
+            addHeader("Tools");
+            List<View> tools = new ArrayList<>();
+            tools.add(register(folderTile(toolPkgs)));
+            addRows(content, tools, COLUMNS, GRID_W, GRID_H, GRID_GAP);
+        }
 
         // Hidden apps
         if (!hidden.isEmpty()) {
@@ -533,9 +643,29 @@ public class MainActivity extends Activity {
             addRows(content, hiddenTiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
         }
 
-        View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
-        if (target == null) target = firstTile;
-        if (target != null) target.requestFocus();
+        if (takeFocus) {
+            View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
+            if (target == null) target = firstTile;
+            if (target != null) target.requestFocus();
+        }
+    }
+
+    private void renderDiscover() {
+        TextView a = new TextView(this);
+        style(a, 26, true, 0xFFFFFFFF);
+        a.setText("Discover is on its way");
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        alp.topMargin = dp(40);
+        alp.leftMargin = dp(12);
+        content.addView(a, alp);
+
+        TextView b = new TextView(this);
+        style(b, 16, false, SOFT_TEXT);
+        b.setText("Trending and top rated films and series will appear here once Discover is set up.");
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        blp.topMargin = dp(10);
+        blp.leftMargin = dp(12);
+        content.addView(b, blp);
     }
 
     private void addGroupSection(String title, String group) {
@@ -736,7 +866,7 @@ public class MainActivity extends Activity {
         for (View t : allTiles) {
             if (t != f) t.animate().alpha(0.35f).setDuration(600).start();
         }
-        if (f != null) f.animate().scaleX(1.18f).scaleY(1.18f).setDuration(600).start();
+        if (f != null && allTiles.contains(f)) f.animate().scaleX(1.18f).scaleY(1.18f).setDuration(600).start();
     }
 
     private void wake() {
@@ -746,10 +876,46 @@ public class MainActivity extends Activity {
             Float a = baseAlpha.get(t);
             t.animate().alpha(a == null ? 1f : a).setDuration(200).start();
         }
-        if (f != null) f.animate().scaleX(1.12f).scaleY(1.12f).setDuration(200).start();
+        if (f != null && allTiles.contains(f)) f.animate().scaleX(1.12f).scaleY(1.12f).setDuration(200).start();
+    }
+
+    // ---------- Settings menu ----------
+
+    private void openSettingsMenu() {
+        String[] opts = {"Arrange apps", "Weather location", "Shield settings", "Cancel"};
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Settings")
+                .setItems(opts, (d, which) -> {
+                    if (which == 0) {
+                        if (onDiscover) {
+                            onDiscover = false;
+                            styleTabs();
+                        }
+                        arranging = true;
+                        render(null);
+                    } else if (which == 1) {
+                        askWeatherPlace();
+                    } else if (which == 2) {
+                        startSafe(new Intent(Settings.ACTION_SETTINGS));
+                    }
+                })
+                .show();
     }
 
     // ---------- VPN status (location by ipwho.is) ----------
+
+    private void openVpnApp() {
+        Intent i = pm.getLeanbackLaunchIntentForPackage(VPN_APP);
+        if (i == null) i = pm.getLaunchIntentForPackage(VPN_APP);
+        if (i != null) startSafe(i);
+        else Toast.makeText(this, "Surfshark isn't installed.", Toast.LENGTH_LONG).show();
+    }
+
+    private String vpnTitle() {
+        if (lastVpnState == null) return "VPN";
+        if (!lastVpnState) return "VPN off";
+        return lastWhere != null ? "VPN connected " + DOT + " " + lastWhere : "VPN connected";
+    }
 
     private void registerNet() {
         if (netCallback != null || cm == null) return;
@@ -825,12 +991,8 @@ public class MainActivity extends Activity {
 
     private void showVpn(boolean on, String where) {
         if (where != null && !where.isEmpty()) lastWhere = where;
-        if (on) {
-            vpnView.setText(lastWhere != null ? lastWhere : "VPN on");
-        } else {
-            vpnView.setText("VPN off");
-        }
-        vpnView.setCompoundDrawablesWithIntrinsicBounds(shieldDrawable(on ? VPN_ON : VPN_OFF), null, null, null);
+        if (vpnDotBg != null) vpnDotBg.setColor(on ? VPN_ON : VPN_OFF);
+        if (vpnBtn != null && vpnBtn.isFocused()) titleView.setText(vpnTitle());
     }
 
     // ---------- Groups ----------
@@ -915,25 +1077,6 @@ public class MainActivity extends Activity {
     private void onAppClicked(String pkg) {
         if (arranging) showAppMenu(pkg);
         else launch(pkg);
-    }
-
-    private void openCustomise() {
-        if (arranging) {
-            exitArrange();
-            return;
-        }
-        String[] opts = {"Arrange apps", "Weather location", "Cancel"};
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Customise")
-                .setItems(opts, (d, which) -> {
-                    if (which == 0) {
-                        arranging = true;
-                        render(null);
-                    } else if (which == 1) {
-                        askWeatherPlace();
-                    }
-                })
-                .show();
     }
 
     private void exitArrange() {
@@ -1049,7 +1192,7 @@ public class MainActivity extends Activity {
         if (prefs.contains("wx_lat")) {
             placeView.setText(prefs.getString("wx_name", ""));
         } else {
-            placeView.setText("Set weather in Customise");
+            placeView.setText("Set weather in Settings");
         }
     }
 
