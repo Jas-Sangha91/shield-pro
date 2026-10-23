@@ -51,14 +51,15 @@ public class MainActivity extends Activity {
     // Dock apps used the very first time only. After that, use Customise on the TV.
     private static final String[] DEFAULT_DOCK = {
             "com.netflix.ninja",
-            "com.google.android.youtube.tv",
+            "com.amazon.amazonvideo.livingroom",
             "com.disney.disneyplus",
-            "com.plexapp.android",
-            "com.nvidia.bbciplayer"
+            "com.google.android.youtube.tv",
+            "ar.tvplayer.tv",
+            "org.xbmc.kodi"
     };
 
     private static final int COLUMNS = 6;
-    private static final int DOCK_W = 160, DOCK_H = 90, DOCK_GAP = 7;
+    private static final int DOCK_W = 160, DOCK_GAP = 7;
     private static final int GRID_W = 128, GRID_H = 72, GRID_GAP = 8;
     private static final long WEATHER_EVERY_MS = 30 * 60 * 1000L;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -168,18 +169,27 @@ public class MainActivity extends Activity {
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{0xFF1B2130, 0xFF07080C}));
 
-        scroll = new ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setClipChildren(false);
-        scroll.setClipToPadding(false);
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(32), dp(24), dp(32), dp(60));
-        content.setClipChildren(false);
-        content.setClipToPadding(false);
-        scroll.addView(content, new FrameLayout.LayoutParams(MATCH, WRAP));
-        root.addView(scroll, new FrameLayout.LayoutParams(MATCH, MATCH));
+        // Fixed header: selected app name on the left, clock and weather on the right
+        FrameLayout header = new FrameLayout(this);
+        header.setPadding(dp(40), dp(28), dp(48), dp(4));
+        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        titleView = new TextView(this);
+        style(titleView, 40, true, 0xFFFFFFFF);
+        titleView.setSingleLine(true);
+        titleView.setText(" ");
+        hintView = new TextView(this);
+        style(hintView, 14, false, 0xFFFFD54F);
+        hintView.setVisibility(View.GONE);
+        left.addView(titleView);
+        left.addView(hintView);
+        header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
@@ -210,10 +220,21 @@ public class MainActivity extends Activity {
             tv.setGravity(Gravity.END);
             info.addView(tv);
         }
+        header.addView(info, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
 
-        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
-        ilp.setMargins(0, dp(28), dp(48), 0);
-        root.addView(info, ilp);
+        // Scrolling area underneath the header
+        scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setVerticalFadingEdgeEnabled(true);
+        scroll.setFadingEdgeLength(dp(28));
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(32), dp(6), dp(32), dp(60));
+        content.setClipChildren(false);
+        content.setClipToPadding(false);
+        scroll.addView(content, new FrameLayout.LayoutParams(MATCH, WRAP));
+        column.addView(scroll, new LinearLayout.LayoutParams(MATCH, 0, 1f));
 
         setContentView(root);
         showWeatherPlaceholder();
@@ -251,25 +272,12 @@ public class MainActivity extends Activity {
         tileByPkg.clear();
         firstTile = null;
 
-        titleView = new TextView(this);
-        style(titleView, 40, true, 0xFFFFFFFF);
-        titleView.setText(" ");
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        tlp.topMargin = dp(120);
-        tlp.leftMargin = dp(8);
-        content.addView(titleView, tlp);
-
-        hintView = new TextView(this);
-        style(hintView, 14, false, 0xFFFFD54F);
         hintView.setText(movingPkg != null
                 ? "Moving: use the arrows, then OK to drop it. Back cancels."
                 : "Arrange mode: press OK on an app to move, dock or hide it. Press Back when finished.");
         hintView.setVisibility(arranging ? View.VISIBLE : View.GONE);
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        hlp.leftMargin = dp(8);
-        content.addView(hintView, hlp);
 
-        // Dock
+        // Dock (tiles shrink a little if there are lots of apps, so it always fits)
         if (!dock.isEmpty()) {
             LinearLayout band = new LinearLayout(this);
             band.setOrientation(LinearLayout.HORIZONTAL);
@@ -281,7 +289,12 @@ public class MainActivity extends Activity {
             bg.setColor(0x1FFFFFFF);
             bg.setCornerRadius(dp(24));
             band.setBackground(bg);
-            for (String p : dock) band.addView(appTile(p), size(DOCK_W, DOCK_H, DOCK_GAP));
+
+            int avail = getResources().getConfiguration().screenWidthDp - 64 - 24;
+            int w = Math.min(DOCK_W, avail / dock.size() - 2 * DOCK_GAP);
+            if (w < 110) w = 110;
+            int h = w * 9 / 16;
+            for (String p : dock) band.addView(appTile(p), size(w, h, DOCK_GAP));
 
             HorizontalScrollView hs = new HorizontalScrollView(this);
             hs.setHorizontalScrollBarEnabled(false);
@@ -289,7 +302,7 @@ public class MainActivity extends Activity {
             hs.setClipToPadding(false);
             hs.addView(band, new FrameLayout.LayoutParams(WRAP, WRAP));
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(WRAP, WRAP);
-            dlp.topMargin = dp(14);
+            dlp.topMargin = dp(4);
             content.addView(hs, dlp);
         }
 
