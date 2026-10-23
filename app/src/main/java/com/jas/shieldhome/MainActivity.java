@@ -372,9 +372,9 @@ public class MainActivity extends Activity {
         glowView.setBackground(glow);
         root.addView(glowView, new FrameLayout.LayoutParams(MATCH, MATCH));
 
+        // The column clips its children, so scrolled content never draws over the header
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
-        column.setClipChildren(false);
         root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         FrameLayout header = new FrameLayout(this);
@@ -401,8 +401,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(WRAP, WRAP);
         tlp.rightMargin = dp(8);
         tabs.addView(tabHome, tlp);
-        tabs.addView(tabDiscover);
-        topLeft.addView(tabs);
+        tabs.addView(tabDiscover, new LinearLayout.LayoutParams(WRAP, WRAP));
+        topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         LinearLayout weatherRow = new LinearLayout(this);
         weatherRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -413,30 +413,33 @@ public class MainActivity extends Activity {
         placeView = new TextView(this);
         style(placeView, 16, false, SOFT_TEXT);
         placeView.setPadding(dp(10), 0, 0, 0);
-        weatherRow.addView(weatherView);
-        weatherRow.addView(placeView);
-        topLeft.addView(weatherRow);
+        weatherRow.addView(weatherView, new LinearLayout.LayoutParams(WRAP, WRAP));
+        weatherRow.addView(placeView, new LinearLayout.LayoutParams(WRAP, WRAP));
+        topLeft.addView(weatherRow, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
-        // Bottom left: selected item name, details line (Discover) and arrange hint
+        // Bottom left: selected item name, details line (Discover) and arrange hint.
+        // Fixed widths so long names fit and only very long ones get "..." at the end.
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         titleView = new TextView(this);
         style(titleView, 40, true, 0xFFFFFFFF);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
-        titleView.setMaxWidth(dp(560));
         titleView.setText(" ");
         metaView = new TextView(this);
         style(metaView, 16, false, SOFT_TEXT);
+        metaView.setSingleLine(true);
         metaView.setVisibility(View.GONE);
         hintView = new TextView(this);
         style(hintView, 16, false, 0xFFFFD54F);
+        hintView.setSingleLine(true);
+        hintView.setEllipsize(TextUtils.TruncateAt.END);
         hintView.setVisibility(View.GONE);
-        left.addView(titleView);
-        left.addView(metaView);
-        left.addView(hintView);
+        left.addView(titleView, new LinearLayout.LayoutParams(dp(620), WRAP));
+        left.addView(metaView, new LinearLayout.LayoutParams(dp(620), WRAP));
+        left.addView(hintView, new LinearLayout.LayoutParams(dp(620), WRAP));
         header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
         // Top right: VPN button, settings cog, clock
@@ -481,9 +484,9 @@ public class MainActivity extends Activity {
         style(date, 18, false, SOFT_TEXT);
         date.setGravity(Gravity.END);
         date.setPadding(0, dp(4), 0, 0);
-        clock.addView(time);
-        clock.addView(date);
-        right.addView(clock);
+        clock.addView(time, new LinearLayout.LayoutParams(WRAP, WRAP));
+        clock.addView(date, new LinearLayout.LayoutParams(WRAP, WRAP));
+        right.addView(clock, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         header.addView(right, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
 
@@ -495,7 +498,7 @@ public class MainActivity extends Activity {
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(32), dp(6), dp(32), dp(60));
+        content.setPadding(dp(32), dp(10), dp(32), dp(60));
         content.setClipChildren(false);
         content.setClipToPadding(false);
         scroll.addView(content, new FrameLayout.LayoutParams(MATCH, WRAP));
@@ -862,15 +865,15 @@ public class MainActivity extends Activity {
             lp.setMargins(dp(2), dp(2), dp(2), dp(2));
             (i < 3 ? row1 : row2).addView(iv, lp);
         }
-        col.addView(row1);
-        col.addView(row2);
+        col.addView(row1, new LinearLayout.LayoutParams(WRAP, WRAP));
+        col.addView(row2, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         TextView label = new TextView(this);
         style(label, 13, false, 0xFFFFFFFF);
         label.setText("Tools (" + pkgs.size() + ")");
         label.setGravity(Gravity.CENTER);
         label.setPadding(0, dp(4), 0, 0);
-        col.addView(label);
+        col.addView(label, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         t.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
         return t;
@@ -978,15 +981,13 @@ public class MainActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(dp(48), dp(32), dp(48), dp(20));
-        col.setClipChildren(false);
-        col.setClipToPadding(false);
         root.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         TextView heading = new TextView(this);
         style(heading, 16, true, SOFT_TEXT);
         heading.setText("Search");
         heading.setPadding(dp(8), 0, 0, dp(10));
-        col.addView(heading);
+        col.addView(heading, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         final EditText field = new EditText(this);
         field.setSingleLine(true);
@@ -1421,7 +1422,7 @@ public class MainActivity extends Activity {
         bg.setColor(SPOT_BG);
         box.setBackground(bg);
         box.setClipToOutline(true);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(MATCH, dp(236));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(MATCH, dp(240));
         blp.setMargins(dp(12), dp(6), dp(12), dp(6));
         content.addView(box, blp);
 
@@ -1439,6 +1440,7 @@ public class MainActivity extends Activity {
                 new int[]{0x000E1118, SPOT_BG}));
         box.addView(shadeBottom, new FrameLayout.LayoutParams(MATCH, dp(70), Gravity.BOTTOM));
 
+        // Text column: fixed width so the description stays on the left, clear of the picture
         LinearLayout text = new LinearLayout(this);
         text.setOrientation(LinearLayout.VERTICAL);
         text.setPadding(dp(26), dp(20), dp(26), dp(20));
@@ -1448,29 +1450,28 @@ public class MainActivity extends Activity {
         TextView label = new TextView(this);
         style(label, 13, true, 0xFFC9A8F0);
         label.setText("Tonight's pick");
-        text.addView(label);
+        text.addView(label, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         spotTitle = new TextView(this);
         style(spotTitle, 30, true, 0xFFFFFFFF);
         spotTitle.setSingleLine(true);
         spotTitle.setEllipsize(TextUtils.TruncateAt.END);
-        spotTitle.setMaxWidth(dp(480));
         spotTitle.setPadding(0, dp(2), 0, 0);
-        text.addView(spotTitle);
+        text.addView(spotTitle, new LinearLayout.LayoutParams(dp(470), WRAP));
 
         spotMeta = new TextView(this);
         style(spotMeta, 15, false, SOFT_TEXT);
+        spotMeta.setSingleLine(true);
         spotMeta.setPadding(0, dp(2), 0, 0);
-        text.addView(spotMeta);
+        text.addView(spotMeta, new LinearLayout.LayoutParams(dp(470), WRAP));
 
         spotDesc = new TextView(this);
         style(spotDesc, 15, false, 0xFFE6E8EE);
-        spotDesc.setMaxLines(3);
+        spotDesc.setMaxLines(2);
         spotDesc.setEllipsize(TextUtils.TruncateAt.END);
         spotDesc.setLineSpacing(0, 1.15f);
-        spotDesc.setMaxWidth(dp(440));
         spotDesc.setPadding(0, dp(8), 0, 0);
-        text.addView(spotDesc);
+        text.addView(spotDesc, new LinearLayout.LayoutParams(dp(430), WRAP));
 
         text.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
@@ -1489,8 +1490,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
         bl2.rightMargin = dp(10);
         buttons.addView(spotList, bl2);
-        buttons.addView(spotSurprise);
-        text.addView(buttons);
+        buttons.addView(spotSurprise, new LinearLayout.LayoutParams(WRAP, WRAP));
+        text.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         box.addView(text, new FrameLayout.LayoutParams(MATCH, MATCH));
 
@@ -1868,18 +1869,18 @@ public class MainActivity extends Activity {
         title.setText(it.title);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        info.addView(title);
+        info.addView(title, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         final TextView metaLine = new TextView(this);
         style(metaLine, 15, false, SOFT_TEXT);
         metaLine.setText(meta(it));
         metaLine.setPadding(0, dp(4), 0, 0);
-        info.addView(metaLine);
+        info.addView(metaLine, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         final TextView genres = new TextView(this);
         style(genres, 14, false, SOFT_TEXT);
         genres.setPadding(0, dp(2), 0, 0);
-        info.addView(genres);
+        info.addView(genres, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         final TextView overview = new TextView(this);
         style(overview, 15, false, 0xFFFFFFFF);
@@ -1888,14 +1889,14 @@ public class MainActivity extends Activity {
         overview.setEllipsize(TextUtils.TruncateAt.END);
         overview.setLineSpacing(0, 1.15f);
         overview.setPadding(0, dp(10), 0, 0);
-        info.addView(overview);
+        info.addView(overview, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         final TextView cast = new TextView(this);
         style(cast, 13, false, SOFT_TEXT);
         cast.setPadding(0, dp(8), 0, 0);
         cast.setSingleLine(true);
         cast.setEllipsize(TextUtils.TruncateAt.END);
-        info.addView(cast);
+        info.addView(cast, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         info.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
@@ -1922,15 +1923,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams bl2 = new LinearLayout.LayoutParams(WRAP, WRAP);
         bl2.rightMargin = dp(10);
         buttons.addView(listBtnHolder[0], bl2);
-        buttons.addView(closeBtn);
-        info.addView(buttons);
+        buttons.addView(closeBtn, new LinearLayout.LayoutParams(WRAP, WRAP));
+        info.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         final TextView moreHeader = new TextView(this);
         style(moreHeader, 15, true, 0xA0FFFFFF);
         moreHeader.setText("More like this");
         moreHeader.setVisibility(View.GONE);
         moreHeader.setPadding(0, dp(16), 0, dp(2));
-        outer.addView(moreHeader);
+        outer.addView(moreHeader, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         final LinearLayout moreBand = new LinearLayout(this);
         moreBand.setOrientation(LinearLayout.HORIZONTAL);
