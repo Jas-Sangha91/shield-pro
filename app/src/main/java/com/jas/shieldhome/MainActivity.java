@@ -5,14 +5,18 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ShapeDrawable;
+import android.graphics.drawable.shapes.PathShape;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -66,13 +70,44 @@ public class MainActivity extends Activity {
             "org.xbmc.kodi"
     };
 
+    // Groups
+    private static final String WATCH = "watch", PLAY = "play", TOOLS = "tools";
+    private static final String[] GROUP_ORDER = {WATCH, PLAY, TOOLS};
+
+    private static final List<String> PLAY_PKGS = Arrays.asList(
+            "com.nvidia.tegrazone3",
+            "com.nvidia.geforcenow",
+            "psplay.grill.com",
+            "com.swordfish.lemuroid",
+            "com.google.android.play.games");
+
+    private static final List<String> TOOLS_PKGS = Arrays.asList(
+            "com.surfshark.vpnclient.android",
+            "com.esaba.downloader",
+            "com.cxinventor.file.explorer",
+            "com.android.documentsui",
+            "com.google.android.documentsui",
+            "com.tcl.browser",
+            "org.videolan.vlc",
+            "com.android.vending",
+            "com.android.gallery3d",
+            "com.google.android.tv",
+            "com.nvidia.inputviewer",
+            "com.plexapp.android",
+            "com.android.tv.settings");
+
     private static final int COLUMNS = 5;
     private static final int DOCK_W = 176, DOCK_GAP = 7;
     private static final int GRID_W = 152, GRID_H = 86, GRID_GAP = 8;
+    private static final int FOLDER_COLUMNS = 4;
+    private static final int FOLDER_W = 128, FOLDER_H = 72;
     private static final long WEATHER_EVERY_MS = 30 * 60 * 1000L;
     private static final long VPN_EVERY_MS = 15 * 60 * 1000L;
     private static final long IDLE_AFTER_MS = 20 * 1000L;
     private static final int NEUTRAL_GLOW = 0xFF3A4A6B;
+    private static final int VPN_ON = 0xFF7BD88F;
+    private static final int VPN_OFF = 0xFFFFB74D;
+    private static final int SOFT_TEXT = 0xB0FFFFFF;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
     private static final String DEG = "\u00B0";
@@ -234,11 +269,33 @@ public class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Fixed header: selected app name on the left, clock, weather and VPN on the right
         FrameLayout header = new FrameLayout(this);
         header.setPadding(dp(40), dp(26), dp(48), dp(4));
-        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(190)));
+        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
 
+        // Top left: weather and VPN status row
+        LinearLayout status = new LinearLayout(this);
+        status.setOrientation(LinearLayout.HORIZONTAL);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+
+        weatherView = new TextView(this);
+        style(weatherView, 20, false, 0xFFFFFFFF);
+
+        placeView = new TextView(this);
+        style(placeView, 16, false, SOFT_TEXT);
+        placeView.setPadding(dp(10), 0, 0, 0);
+
+        vpnView = new TextView(this);
+        style(vpnView, 16, false, SOFT_TEXT);
+        vpnView.setPadding(dp(28), 0, 0, 0);
+        vpnView.setCompoundDrawablePadding(dp(8));
+
+        status.addView(weatherView);
+        status.addView(placeView);
+        status.addView(vpnView);
+        header.addView(status, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
+
+        // Bottom left: selected app name (and arrange hint)
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         titleView = new TextView(this);
@@ -252,37 +309,30 @@ public class MainActivity extends Activity {
         left.addView(hintView);
         header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        info.setGravity(Gravity.END);
+        // Top right: large, light clock and date
+        LinearLayout clock = new LinearLayout(this);
+        clock.setOrientation(LinearLayout.VERTICAL);
+        clock.setGravity(Gravity.END);
 
         TextClock time = new TextClock(this);
         time.setFormat12Hour("HH:mm");
         time.setFormat24Hour("HH:mm");
-        style(time, 34, true, 0xFFFFFFFF);
+        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 46);
+        time.setTextColor(0xFFFFFFFF);
+        time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        time.setGravity(Gravity.END);
+        time.setIncludeFontPadding(false);
 
         TextClock date = new TextClock(this);
         date.setFormat12Hour("EEEE d MMMM");
         date.setFormat24Hour("EEEE d MMMM");
-        style(date, 16, false, 0xB0FFFFFF);
+        style(date, 18, false, SOFT_TEXT);
+        date.setGravity(Gravity.END);
+        date.setPadding(0, dp(4), 0, 0);
 
-        weatherView = new TextView(this);
-        style(weatherView, 20, false, 0xFFFFFFFF);
-        weatherView.setPadding(0, dp(8), 0, 0);
-
-        placeView = new TextView(this);
-        style(placeView, 14, false, 0xA0FFFFFF);
-
-        vpnView = new TextView(this);
-        style(vpnView, 14, false, 0xA0FFFFFF);
-        vpnView.setPadding(0, dp(4), 0, 0);
-
-        TextView[] lines = {time, date, weatherView, placeView, vpnView};
-        for (TextView tv : lines) {
-            tv.setGravity(Gravity.END);
-            info.addView(tv);
-        }
-        header.addView(info, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
+        clock.addView(time);
+        clock.addView(date);
+        header.addView(clock, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
 
         // Scrolling area underneath the header
         scroll = new ScrollView(this);
@@ -300,6 +350,22 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         showWeatherPlaceholder();
+    }
+
+    private Drawable shieldDrawable(int color) {
+        Path p = new Path();
+        p.moveTo(8f, 0f);
+        p.lineTo(16f, 3f);
+        p.lineTo(16f, 9f);
+        p.quadTo(16f, 15f, 8f, 18f);
+        p.quadTo(0f, 15f, 0f, 9f);
+        p.lineTo(0f, 3f);
+        p.close();
+        ShapeDrawable d = new ShapeDrawable(new PathShape(p, 16f, 18f));
+        d.getPaint().setColor(color);
+        d.setIntrinsicWidth(dp(15));
+        d.setIntrinsicHeight(dp(17));
+        return d;
     }
 
     private static int[] timeOfDayColors() {
@@ -407,7 +473,7 @@ public class MainActivity extends Activity {
 
         hintView.setText(movingPkg != null
                 ? "Moving: use the arrows, then OK to drop it. Back cancels."
-                : "Arrange mode: press OK on an app to move, dock or hide it. Press Back when finished.");
+                : "Arrange mode: press OK on an app to move, group, dock or hide it. Press Back when finished.");
         hintView.setVisibility(arranging ? View.VISIBLE : View.GONE);
 
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
@@ -439,21 +505,20 @@ public class MainActivity extends Activity {
             content.addView(hs, dlp);
         }
 
-        // All apps
-        addHeader("All apps");
-        List<View> gridTiles = new ArrayList<>();
-        for (String p : grid) gridTiles.add(appTile(p));
-        addRows(gridTiles);
+        // Watch and Play groups
+        addGroupSection("Watch", WATCH);
+        addGroupSection("Play", PLAY);
 
-        // Settings and Customise
-        View spacer = new View(this);
-        content.addView(spacer, new LinearLayout.LayoutParams(1, dp(12)));
+        // Tools: folder tile, Settings and Customise
+        addHeader("Tools");
         List<View> tools = new ArrayList<>();
-        tools.add(tile("Settings", null, null, false, null,
-                () -> startSafe(new Intent(Settings.ACTION_SETTINGS))));
-        tools.add(tile(arranging ? "Done arranging" : "Customise", null, null, false, null,
-                this::openCustomise));
-        addRows(tools);
+        final List<String> toolPkgs = pkgsInGroup(TOOLS);
+        if (!toolPkgs.isEmpty()) tools.add(register(folderTile(toolPkgs)));
+        tools.add(register(tile("Settings", null, null, false, null,
+                () -> startSafe(new Intent(Settings.ACTION_SETTINGS)))));
+        tools.add(register(tile(arranging ? "Done arranging" : "Customise", null, null, false, null,
+                this::openCustomise)));
+        addRows(content, tools, COLUMNS, GRID_W, GRID_H, GRID_GAP);
 
         // Hidden apps
         if (!hidden.isEmpty()) {
@@ -465,7 +530,7 @@ public class MainActivity extends Activity {
                 baseAlpha.put(t, 0.5f);
                 hiddenTiles.add(t);
             }
-            addRows(hiddenTiles);
+            addRows(content, hiddenTiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
         }
 
         View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
@@ -473,41 +538,131 @@ public class MainActivity extends Activity {
         if (target != null) target.requestFocus();
     }
 
+    private void addGroupSection(String title, String group) {
+        List<String> pkgs = pkgsInGroup(group);
+        if (pkgs.isEmpty()) return;
+        addHeader(title);
+        List<View> tiles = new ArrayList<>();
+        for (String p : pkgs) tiles.add(appTile(p));
+        addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
+    }
+
+    private List<String> pkgsInGroup(String group) {
+        List<String> out = new ArrayList<>();
+        for (String p : grid) if (groupOf(p).equals(group)) out.add(p);
+        return out;
+    }
+
     private void addHeader(String text) {
         TextView h = new TextView(this);
         style(h, 18, true, 0xA0FFFFFF);
         h.setText(text);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.topMargin = dp(28);
+        lp.topMargin = dp(24);
         lp.bottomMargin = dp(4);
         lp.leftMargin = dp(12);
         content.addView(h, lp);
     }
 
-    private void addRows(List<View> views) {
+    private void addRows(LinearLayout parent, List<View> views, int cols, int w, int h, int gap) {
         LinearLayout row = null;
         for (int i = 0; i < views.size(); i++) {
-            if (i % COLUMNS == 0) {
+            if (i % cols == 0) {
                 row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setPadding(dp(12), 0, dp(12), 0);
                 row.setClipChildren(false);
                 row.setClipToPadding(false);
-                content.addView(row, new LinearLayout.LayoutParams(WRAP, WRAP));
+                parent.addView(row, new LinearLayout.LayoutParams(WRAP, WRAP));
             }
-            row.addView(views.get(i), size(GRID_W, GRID_H, GRID_GAP));
+            row.addView(views.get(i), size(w, h, gap));
         }
     }
 
+    private View register(View t) {
+        allTiles.add(t);
+        baseAlpha.put(t, 1f);
+        return t;
+    }
+
     private View appTile(final String pkg) {
+        View t = buildAppTile(pkg, () -> onAppClicked(pkg));
+        tileByPkg.put(pkg, t);
+        if (firstTile == null) firstTile = t;
+        return register(t);
+    }
+
+    private View buildAppTile(String pkg, Runnable onClick) {
         ResolveInfo ri = installed.get(pkg);
         String label = ri.loadLabel(pm).toString();
         Drawable banner = ri.activityInfo.loadBanner(pm);
         if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-        View t = tile(label, banner, ri.loadIcon(pm), pkg.equals(movingPkg), pkg, () -> onAppClicked(pkg));
-        tileByPkg.put(pkg, t);
-        if (firstTile == null) firstTile = t;
+        return tile(label, banner, ri.loadIcon(pm), pkg.equals(movingPkg), pkg, onClick);
+    }
+
+    private View folderTile(final List<String> pkgs) {
+        FrameLayout t = (FrameLayout) tile("Tools", null, null, false, null, () -> openTools(pkgs));
+        t.removeAllViews();
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+
+        LinearLayout row1 = new LinearLayout(this);
+        LinearLayout row2 = new LinearLayout(this);
+        for (int i = 0; i < Math.min(6, pkgs.size()); i++) {
+            ResolveInfo ri = installed.get(pkgs.get(i));
+            Drawable d = ri.activityInfo.loadBanner(pm);
+            if (d == null) d = ri.activityInfo.applicationInfo.loadBanner(pm);
+            if (d == null) d = ri.loadIcon(pm);
+            ImageView iv = new ImageView(this);
+            iv.setImageDrawable(d);
+            iv.setScaleType(ImageView.ScaleType.FIT_XY);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(18));
+            lp.setMargins(dp(2), dp(2), dp(2), dp(2));
+            (i < 3 ? row1 : row2).addView(iv, lp);
+        }
+        col.addView(row1);
+        col.addView(row2);
+
+        TextView label = new TextView(this);
+        style(label, 13, false, 0xFFFFFFFF);
+        label.setText("Tools (" + pkgs.size() + ")");
+        label.setGravity(Gravity.CENTER);
+        label.setPadding(0, dp(4), 0, 0);
+        col.addView(label);
+
+        t.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
         return t;
+    }
+
+    private void openTools(List<String> pkgs) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(12), dp(8), dp(12));
+        box.setClipChildren(false);
+        box.setClipToPadding(false);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box);
+
+        final AlertDialog[] holder = new AlertDialog[1];
+        List<View> views = new ArrayList<>();
+        for (final String p : pkgs) {
+            views.add(buildAppTile(p, () -> {
+                if (holder[0] != null) holder[0].dismiss();
+                onAppClicked(p);
+            }));
+        }
+        addRows(box, views, FOLDER_COLUMNS, FOLDER_W, FOLDER_H, GRID_GAP);
+
+        holder[0] = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(arranging ? "Tools: press OK on an app to change it" : "Tools")
+                .setView(sv)
+                .setNegativeButton("Close", null)
+                .create();
+        holder[0].show();
+        if (holder[0].getWindow() != null) holder[0].getWindow().setLayout(dp(700), WRAP);
     }
 
     private View tile(final String label, Drawable banner, Drawable icon, boolean moving,
@@ -563,9 +718,6 @@ public class MainActivity extends Activity {
             }
         });
         t.setOnClickListener(v -> onClick.run());
-
-        allTiles.add(t);
-        baseAlpha.put(t, 1f);
         return t;
     }
 
@@ -578,7 +730,7 @@ public class MainActivity extends Activity {
     }
 
     private void goIdle() {
-        if (arranging || movingPkg != null) return;
+        if (arranging || movingPkg != null || !hasWindowFocus()) return;
         idle = true;
         View f = getCurrentFocus();
         for (View t : allTiles) {
@@ -662,8 +814,7 @@ public class MainActivity extends Activity {
                 JSONObject o = new JSONObject(httpGet("https://ipwho.is/"));
                 if (o.optBoolean("success", false)) {
                     String city = o.optString("city", "");
-                    String country = o.optString("country", "");
-                    where = city.isEmpty() ? country : city + ", " + country;
+                    where = city.isEmpty() ? o.optString("country", "") : city;
                 }
             } catch (Exception ignored) {
             }
@@ -674,10 +825,58 @@ public class MainActivity extends Activity {
 
     private void showVpn(boolean on, String where) {
         if (where != null && !where.isEmpty()) lastWhere = where;
-        String text = "\u25CF  " + (on ? "VPN on" : "VPN off");
-        if (lastWhere != null) text += "  " + DOT + "  " + lastWhere;
-        vpnView.setText(text);
-        vpnView.setTextColor(on ? 0xFF7BD88F : 0xFFFFB74D);
+        if (on) {
+            vpnView.setText(lastWhere != null ? lastWhere : "VPN on");
+        } else {
+            vpnView.setText("VPN off");
+        }
+        vpnView.setCompoundDrawablesWithIntrinsicBounds(shieldDrawable(on ? VPN_ON : VPN_OFF), null, null, null);
+    }
+
+    // ---------- Groups ----------
+
+    private String groupOf(String pkg) {
+        String saved = prefs.getString("group_" + pkg, null);
+        return saved != null ? saved : defaultGroup(pkg);
+    }
+
+    private String defaultGroup(String pkg) {
+        if (PLAY_PKGS.contains(pkg)) return PLAY;
+        if (TOOLS_PKGS.contains(pkg)) return TOOLS;
+        ResolveInfo ri = installed.get(pkg);
+        int cat = ri != null ? ri.activityInfo.applicationInfo.category : ApplicationInfo.CATEGORY_UNDEFINED;
+        if (cat == ApplicationInfo.CATEGORY_GAME) return PLAY;
+        if (cat == ApplicationInfo.CATEGORY_VIDEO || cat == ApplicationInfo.CATEGORY_AUDIO
+                || cat == ApplicationInfo.CATEGORY_NEWS || cat == ApplicationInfo.CATEGORY_UNDEFINED) {
+            return WATCH;
+        }
+        return TOOLS;
+    }
+
+    private static String groupName(String g) {
+        if (PLAY.equals(g)) return "Play";
+        if (TOOLS.equals(g)) return "Tools";
+        return "Watch";
+    }
+
+    private void chooseGroup(final String pkg) {
+        String current = groupOf(pkg);
+        final List<String> options = new ArrayList<>();
+        final List<String> names = new ArrayList<>();
+        for (String g : GROUP_ORDER) {
+            if (!g.equals(current)) {
+                options.add(g);
+                names.add(groupName(g));
+            }
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Move to group")
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    prefs.edit().putString("group_" + pkg, options.get(which)).apply();
+                    saveAndRender(pkg);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ---------- Arranging ----------
@@ -746,8 +945,10 @@ public class MainActivity extends Activity {
     private void showAppMenu(final String pkg) {
         final boolean isDock = dock.contains(pkg);
         final boolean isHidden = hidden.contains(pkg);
+        final boolean inToolsFolder = !isDock && !isHidden && TOOLS.equals(groupOf(pkg));
         final List<String> opts = new ArrayList<>();
-        if (!isHidden) opts.add("Move");
+        if (!isHidden && !inToolsFolder) opts.add("Move");
+        if (!isHidden && !isDock) opts.add("Move to group");
         opts.add(isDock ? "Remove from dock" : "Add to dock");
         opts.add(isHidden ? "Unhide" : "Hide");
         opts.add("Cancel");
@@ -759,6 +960,8 @@ public class MainActivity extends Activity {
                     String o = opts.get(which);
                     if (o.equals("Move")) {
                         startMove(pkg);
+                    } else if (o.equals("Move to group")) {
+                        chooseGroup(pkg);
                     } else if (o.equals("Add to dock")) {
                         grid.remove(pkg);
                         hidden.remove(pkg);
@@ -803,12 +1006,30 @@ public class MainActivity extends Activity {
     }
 
     private void moveBy(int delta) {
-        List<String> list = dock.contains(movingPkg) ? dock : grid;
-        int i = list.indexOf(movingPkg);
+        if (dock.contains(movingPkg)) {
+            int i = dock.indexOf(movingPkg);
+            int j = i + delta;
+            if (i < 0 || j < 0 || j >= dock.size()) return;
+            dock.remove(i);
+            dock.add(j, movingPkg);
+            render(movingPkg);
+            return;
+        }
+        String g = groupOf(movingPkg);
+        List<String> sub = pkgsInGroup(g);
+        int i = sub.indexOf(movingPkg);
         int j = i + delta;
-        if (i < 0 || j < 0 || j >= list.size()) return;
-        list.remove(i);
-        list.add(j, movingPkg);
+        if (i < 0 || j < 0 || j >= sub.size()) return;
+        sub.remove(i);
+        sub.add(j, movingPkg);
+
+        List<String> rebuilt = new ArrayList<>();
+        for (String grp : GROUP_ORDER) {
+            if (grp.equals(g)) rebuilt.addAll(sub);
+            else rebuilt.addAll(pkgsInGroup(grp));
+        }
+        grid.clear();
+        grid.addAll(rebuilt);
         render(movingPkg);
     }
 
@@ -824,10 +1045,10 @@ public class MainActivity extends Activity {
     // ---------- Weather (data by Open-Meteo.com) ----------
 
     private void showWeatherPlaceholder() {
+        weatherView.setText("");
         if (prefs.contains("wx_lat")) {
             placeView.setText(prefs.getString("wx_name", ""));
         } else {
-            weatherView.setText("");
             placeView.setText("Set weather in Customise");
         }
     }
@@ -918,17 +1139,13 @@ public class MainActivity extends Activity {
             try {
                 String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
                         + "&current=temperature_2m,weather_code"
-                        + "&daily=temperature_2m_max,temperature_2m_min"
                         + "&timezone=auto&forecast_days=1";
                 JSONObject o = new JSONObject(httpGet(url));
                 JSONObject cur = o.getJSONObject("current");
-                JSONObject day = o.getJSONObject("daily");
                 final long now = Math.round(cur.getDouble("temperature_2m"));
                 final int code = cur.getInt("weather_code");
-                final long hi = Math.round(day.getJSONArray("temperature_2m_max").getDouble(0));
-                final long lo = Math.round(day.getJSONArray("temperature_2m_min").getDouble(0));
                 runOnUiThread(() -> {
-                    weatherView.setText(symbol(code) + "  " + now + DEG + "    H " + hi + DEG + "  L " + lo + DEG);
+                    weatherView.setText(symbol(code) + "  " + now + DEG);
                     placeView.setText(prefs.getString("wx_name", "") + "  " + DOT + "  " + describe(code));
                 });
             } catch (Exception ex) {
