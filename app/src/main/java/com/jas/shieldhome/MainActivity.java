@@ -955,7 +955,7 @@ public class MainActivity extends Activity {
     // ---------- Settings menu ----------
 
     private void openSettingsMenu() {
-        String[] opts = {"Shield settings", "Clock time zone", "Weather location"};
+        String[] opts = {"Shield settings", "Clock time zone", "Weather location", "Backup and restore"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Settings")
                 .setItems(opts, (d, which) -> {
@@ -965,9 +965,22 @@ public class MainActivity extends Activity {
                         weather.askClockZone();
                     } else if (which == 2) {
                         weather.askWeatherPlace();
+                    } else if (which == 3) {
+                        new Backup(this).openMenu();
                     }
                 })
                 .show();
+    }
+
+    /** After a restore, reload everything from the restored settings. */
+    void reloadAfterRestore() {
+        installedSignature = "";
+        page = PAGE_HOME;
+        styleTabs();
+        refreshInstalled();
+        weather.showPlaceholder();
+        weather.fetch();
+        weather.applyClockZone();
     }
 
     // ---------- Small helpers ----------
