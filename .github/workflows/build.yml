@@ -41,6 +41,8 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
         run: gradle assembleDebug
 
       - name: Rename APK
