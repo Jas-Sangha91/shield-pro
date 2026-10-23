@@ -176,7 +176,7 @@ public class MainActivity extends Activity {
 
     private ScrollView scroll;
     private LinearLayout content;
-    private TextView titleView, metaView, hintView, weatherView, placeView;
+    private TextView titleView, metaView, hintView, weatherView, placeView, vpnCityView;
     private TextView tabHome, tabDiscover;
     private FrameLayout searchBtn, vpnBtn, cogBtn;
     private GradientDrawable vpnDotBg;
@@ -442,10 +442,21 @@ public class MainActivity extends Activity {
         left.addView(hintView, new LinearLayout.LayoutParams(dp(620), WRAP));
         header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
-        // Top right: VPN button, settings cog, clock
+        // Top right: VPN city (only when connected), VPN button, settings cog, clock
         LinearLayout right = new LinearLayout(this);
         right.setOrientation(LinearLayout.HORIZONTAL);
         right.setClipChildren(false);
+
+        vpnCityView = new TextView(this);
+        style(vpnCityView, 15, false, SOFT_TEXT);
+        vpnCityView.setSingleLine(true);
+        vpnCityView.setEllipsize(TextUtils.TruncateAt.END);
+        vpnCityView.setMaxEms(12);
+        vpnCityView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams vclp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        vclp.topMargin = dp(13);
+        vclp.rightMargin = dp(8);
+        right.addView(vpnCityView, vclp);
 
         vpnBtn = roundButton(R.drawable.ic_shield, this::vpnTitle, this::openVpnApp);
         vpnDotBg = new GradientDrawable();
@@ -2330,6 +2341,14 @@ public class MainActivity extends Activity {
     private void showVpn(boolean on, String where) {
         if (where != null && !where.isEmpty()) lastWhere = where;
         if (vpnDotBg != null) vpnDotBg.setColor(on ? VPN_ON : VPN_OFF);
+        if (vpnCityView != null) {
+            if (on && lastWhere != null) {
+                vpnCityView.setText(lastWhere);
+                vpnCityView.setVisibility(View.VISIBLE);
+            } else {
+                vpnCityView.setVisibility(View.GONE);
+            }
+        }
         if (vpnBtn != null && vpnBtn.isFocused()) titleView.setText(vpnTitle());
     }
 
