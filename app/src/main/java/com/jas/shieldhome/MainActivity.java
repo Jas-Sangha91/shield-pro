@@ -73,10 +73,11 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public class MainActivity extends Activity {
 
-    // Dock apps used the very first time only. After that, use the settings cog on the TV.
+    // Dock apps used the very first time only. After that, hold OK on an app to change the dock.
     private static final String[] DEFAULT_DOCK = {
             "com.netflix.ninja",
             "com.amazon.amazonvideo.livingroom",
@@ -87,10 +88,8 @@ public class MainActivity extends Activity {
 
     private static final String VPN_APP = "com.surfshark.vpnclient.android";
     private static final String YOUTUBE_APP = "com.google.android.youtube.tv";
-    private static final String GOOGLE_HOME = "com.google.android.tvlauncher";
-    private static final String GUIDE_URL = "github.com/Jas-Sangha91/shield-pro/blob/main/GUIDE.md";
 
-    // Groups
+    // Groups (sections)
     private static final String WATCH = "watch", PLAY = "play", TOOLS = "tools";
     private static final String[] GROUP_ORDER = {WATCH, PLAY, TOOLS};
 
@@ -108,13 +107,24 @@ public class MainActivity extends Activity {
             "com.android.documentsui",
             "com.google.android.documentsui",
             "com.tcl.browser",
-            "org.videolan.vlc",
             "com.android.vending",
             "com.android.gallery3d",
             "com.google.android.tv",
             "com.nvidia.inputviewer",
-            "com.plexapp.android",
             "com.android.tv.settings");
+
+    // Rarely used tools that go into a "More tools" folder the first time folders are set up
+    private static final List<String> DEFAULT_FOLDER_PKGS = Arrays.asList(
+            "com.android.vending",
+            "com.cxinventor.file.explorer",
+            "com.android.documentsui",
+            "com.google.android.documentsui",
+            "com.android.gallery3d",
+            "com.google.android.tv",
+            "com.nvidia.inputviewer",
+            "com.android.tv.settings");
+
+    private static final String FOLDER_PREFIX = "f:";
 
     // Discover (data from TMDB)
     private static final String TMDB_API = "https://api.themoviedb.org/3";
@@ -168,6 +178,13 @@ public class MainActivity extends Activity {
         final List<Item> items = new ArrayList<>();
     }
 
+    private static class Folder {
+        String id;
+        String name;
+        String group;
+        final List<String> apps = new ArrayList<>();
+    }
+
     private PackageManager pm;
     private SharedPreferences prefs;
     private ConnectivityManager cm;
@@ -177,6 +194,8 @@ public class MainActivity extends Activity {
     private LinearLayout content;
     private LinearLayout weatherRow;
     private TextView titleView, metaView, hintView, weatherView, placeView, vpnCityView;
+    private TextClock timeClock, dateClock;
+    private TextView clockPlaceView;
     private TextView tabHome, tabDiscover;
     private FrameLayout searchBtn, vpnBtn, cogBtn;
     private GradientDrawable vpnDotBg;
@@ -186,8 +205,9 @@ public class MainActivity extends Activity {
 
     private final Map<String, ResolveInfo> installed = new LinkedHashMap<>();
     private final List<String> dock = new ArrayList<>();
-    private final List<String> grid = new ArrayList<>();
+    private final List<String> grid = new ArrayList<>();   // app packages and folder keys, in order
     private final List<String> hidden = new ArrayList<>();
+    private final Map<String, Folder> folders = new LinkedHashMap<>();
     private final Map<String, View> tileByPkg = new HashMap<>();
     private final Map<String, Integer> colorByPkg = new HashMap<>();
     private final List<View> allTiles = new ArrayList<>();
@@ -481,22 +501,29 @@ public class MainActivity extends Activity {
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
         clock.setGravity(Gravity.END);
-        TextClock time = new TextClock(this);
-        time.setFormat12Hour("HH:mm");
-        time.setFormat24Hour("HH:mm");
-        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 46);
-        time.setTextColor(0xFFFFFFFF);
-        time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        time.setGravity(Gravity.END);
-        time.setIncludeFontPadding(false);
-        TextClock date = new TextClock(this);
-        date.setFormat12Hour("EEEE d MMMM");
-        date.setFormat24Hour("EEEE d MMMM");
-        style(date, 18, false, SOFT_TEXT);
-        date.setGravity(Gravity.END);
-        date.setPadding(0, dp(4), 0, 0);
-        clock.addView(time, new LinearLayout.LayoutParams(WRAP, WRAP));
-        clock.addView(date, new LinearLayout.LayoutParams(WRAP, WRAP));
+        timeClock = new TextClock(this);
+        timeClock.setFormat12Hour("HH:mm");
+        timeClock.setFormat24Hour("HH:mm");
+        timeClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 46);
+        timeClock.setTextColor(0xFFFFFFFF);
+        timeClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        timeClock.setGravity(Gravity.END);
+        timeClock.setIncludeFontPadding(false);
+        dateClock = new TextClock(this);
+        dateClock.setFormat12Hour("EEEE d MMMM");
+        dateClock.setFormat24Hour("EEEE d MMMM");
+        style(dateClock, 18, false, SOFT_TEXT);
+        dateClock.setGravity(Gravity.END);
+        dateClock.setPadding(0, dp(4), 0, 0);
+        clockPlaceView = new TextView(this);
+        style(clockPlaceView, 14, false, SOFT_TEXT);
+        clockPlaceView.setGravity(Gravity.END);
+        clockPlaceView.setSingleLine(true);
+        clockPlaceView.setPadding(0, dp(2), 0, 0);
+        clockPlaceView.setVisibility(View.GONE);
+        clock.addView(timeClock, new LinearLayout.LayoutParams(WRAP, WRAP));
+        clock.addView(dateClock, new LinearLayout.LayoutParams(WRAP, WRAP));
+        clock.addView(clockPlaceView, new LinearLayout.LayoutParams(WRAP, WRAP));
         right.addView(clock, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         header.addView(right, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END));
@@ -518,6 +545,7 @@ public class MainActivity extends Activity {
         setContentView(root);
         styleTabs();
         showWeatherPlaceholder();
+        applyClockZone();
     }
 
     private TextView makeTab(final String label, final boolean discover) {
@@ -714,7 +742,7 @@ public class MainActivity extends Activity {
 
         hintView.setText(movingPkg != null
                 ? "Moving: use the arrows, then OK to drop it. Back cancels."
-                : "Arrange mode: press OK on an app to move, group, dock or hide it. Press Back when finished.");
+                : "Arrange mode: press OK on an app or folder to change it. Press Back when finished.");
         hintView.setVisibility((arranging || movingPkg != null) ? View.VISIBLE : View.GONE);
         metaView.setText("");
         metaView.setVisibility(onDiscover ? View.VISIBLE : View.GONE);
@@ -756,18 +784,10 @@ public class MainActivity extends Activity {
             content.addView(hs, dlp);
         }
 
-        // Watch and Play groups
+        // Sections (each can hold apps and folders)
         addGroupSection("Watch", WATCH);
         addGroupSection("Play", PLAY);
-
-        // Tools folder
-        final List<String> toolPkgs = pkgsInGroup(TOOLS);
-        if (!toolPkgs.isEmpty()) {
-            addHeader("Tools");
-            List<View> tools = new ArrayList<>();
-            tools.add(register(folderTile(toolPkgs)));
-            addRows(content, tools, COLUMNS, GRID_W, GRID_H, GRID_GAP);
-        }
+        addGroupSection("Tools", TOOLS);
 
         // Hidden apps
         if (!hidden.isEmpty()) {
@@ -790,17 +810,21 @@ public class MainActivity extends Activity {
     }
 
     private void addGroupSection(String title, String group) {
-        List<String> pkgs = pkgsInGroup(group);
-        if (pkgs.isEmpty()) return;
+        List<String> keys = keysInGroup(group);
+        if (keys.isEmpty()) return;
         addHeader(title);
         List<View> tiles = new ArrayList<>();
-        for (String p : pkgs) tiles.add(appTile(p));
+        for (String k : keys) {
+            Folder f = folderForKey(k);
+            if (f != null) tiles.add(folderTile(f));
+            else if (installed.containsKey(k)) tiles.add(appTile(k));
+        }
         addRows(content, tiles, COLUMNS, GRID_W, GRID_H, GRID_GAP);
     }
 
-    private List<String> pkgsInGroup(String group) {
+    private List<String> keysInGroup(String group) {
         List<String> out = new ArrayList<>();
-        for (String p : grid) if (groupOf(p).equals(group)) out.add(p);
+        for (String k : grid) if (groupOf(k).equals(group)) out.add(k);
         return out;
     }
 
@@ -859,8 +883,10 @@ public class MainActivity extends Activity {
         return tile(label, banner, ri.loadIcon(pm), pkg.equals(movingPkg), pkg, onClick);
     }
 
-    private View folderTile(final List<String> pkgs) {
-        FrameLayout t = (FrameLayout) tile("Tools", null, null, false, null, () -> openTools(pkgs));
+    private View folderTile(final Folder f) {
+        final String key = FOLDER_PREFIX + f.id;
+        FrameLayout t = (FrameLayout) tile(f.name, null, null, key.equals(movingPkg), null,
+                () -> onFolderClicked(f));
         t.removeAllViews();
 
         LinearLayout col = new LinearLayout(this);
@@ -869,8 +895,11 @@ public class MainActivity extends Activity {
 
         LinearLayout row1 = new LinearLayout(this);
         LinearLayout row2 = new LinearLayout(this);
-        for (int i = 0; i < Math.min(6, pkgs.size()); i++) {
-            ResolveInfo ri = installed.get(pkgs.get(i));
+        int shown = 0;
+        for (String p : f.apps) {
+            if (shown >= 6) break;
+            ResolveInfo ri = installed.get(p);
+            if (ri == null) continue;
             Drawable d = ri.activityInfo.loadBanner(pm);
             if (d == null) d = ri.activityInfo.applicationInfo.loadBanner(pm);
             if (d == null) d = ri.loadIcon(pm);
@@ -879,23 +908,37 @@ public class MainActivity extends Activity {
             iv.setScaleType(ImageView.ScaleType.FIT_XY);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(18));
             lp.setMargins(dp(2), dp(2), dp(2), dp(2));
-            (i < 3 ? row1 : row2).addView(iv, lp);
+            (shown < 3 ? row1 : row2).addView(iv, lp);
+            shown++;
         }
         col.addView(row1, new LinearLayout.LayoutParams(WRAP, WRAP));
         col.addView(row2, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         TextView label = new TextView(this);
         style(label, 13, false, 0xFFFFFFFF);
-        label.setText("Tools (" + pkgs.size() + ")");
+        label.setText(f.name + " (" + f.apps.size() + ")");
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
         label.setGravity(Gravity.CENTER);
-        label.setPadding(0, dp(4), 0, 0);
-        col.addView(label, new LinearLayout.LayoutParams(WRAP, WRAP));
+        label.setPadding(dp(6), dp(4), dp(6), 0);
+        col.addView(label, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         t.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
-        return t;
+        t.setOnLongClickListener(v -> {
+            showFolderMenu(f, !arranging);
+            return true;
+        });
+        tileByPkg.put(key, t);
+        if (firstTile == null) firstTile = t;
+        return register(t);
     }
 
-    private void openTools(List<String> pkgs) {
+    private void onFolderClicked(Folder f) {
+        if (arranging) showFolderMenu(f, true);
+        else openFolder(f);
+    }
+
+    private void openFolder(final Folder f) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(8), dp(12), dp(8), dp(12));
@@ -907,7 +950,8 @@ public class MainActivity extends Activity {
 
         final AlertDialog[] holder = new AlertDialog[1];
         List<View> views = new ArrayList<>();
-        for (final String p : pkgs) {
+        for (final String p : new ArrayList<>(f.apps)) {
+            if (!installed.containsKey(p)) continue;
             View t = buildAppTile(p, () -> {
                 if (holder[0] != null) holder[0].dismiss();
                 onAppClicked(p);
@@ -922,7 +966,7 @@ public class MainActivity extends Activity {
         addRows(box, views, FOLDER_COLUMNS, FOLDER_W, FOLDER_H, GRID_GAP);
 
         holder[0] = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(arranging ? "Tools: press OK on an app to change it" : "Tools")
+                .setTitle(arranging ? f.name + ": press OK on an app to change it" : f.name)
                 .setView(sv)
                 .setNegativeButton("Close", null)
                 .create();
@@ -2198,61 +2242,60 @@ public class MainActivity extends Activity {
     // ---------- Settings menu ----------
 
     private void openSettingsMenu() {
-        String[] opts = {"Arrange apps", "Weather location", "Shield settings",
-                "Open Google home screen", "How to restore", "Cancel"};
+        String[] opts = {"Shield settings", "Clock time zone", "Weather location"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Settings")
                 .setItems(opts, (d, which) -> {
                     if (which == 0) {
-                        if (onDiscover) {
-                            onDiscover = false;
-                            styleTabs();
-                        }
-                        arranging = true;
-                        render(null);
-                    } else if (which == 1) {
-                        askWeatherPlace();
-                    } else if (which == 2) {
                         startSafe(new Intent(Settings.ACTION_SETTINGS));
-                    } else if (which == 3) {
-                        openGoogleHome();
-                    } else if (which == 4) {
-                        showRestoreHelp(false);
+                    } else if (which == 1) {
+                        askClockZone();
+                    } else if (which == 2) {
+                        askWeatherPlace();
                     }
                 })
                 .show();
     }
 
-    private void openGoogleHome() {
-        Intent i = new Intent(Intent.ACTION_MAIN);
-        i.addCategory(Intent.CATEGORY_HOME);
-        i.setPackage(GOOGLE_HOME);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            startActivity(i);
-        } catch (Exception e) {
-            showRestoreHelp(true);
+    // ---------- Clock time zone (display only, the Shield's own time is unchanged) ----------
+
+    private void applyClockZone() {
+        String tz = prefs.getString("clock_tz", null);
+        if (timeClock != null) timeClock.setTimeZone(tz);
+        if (dateClock != null) dateClock.setTimeZone(tz);
+        if (clockPlaceView != null) {
+            if (tz != null) {
+                clockPlaceView.setText(prefs.getString("clock_name", ""));
+                clockPlaceView.setVisibility(View.VISIBLE);
+            } else {
+                clockPlaceView.setVisibility(View.GONE);
+            }
         }
     }
 
-    private void showRestoreHelp(boolean googleIsOff) {
-        String intro = googleIsOff
-                ? "Google's home screen is switched off, so it can't be opened from here. To switch it back on:\n\n"
-                : "To go back to Google's original home screen:\n\n";
-        String steps = "1. On the Mac, open Terminal and run:\n"
-                + "   cd ~/Downloads/platform-tools\n"
-                + "   ./adb connect 192.168.1.197:5555\n\n"
-                + "2. Then run these three lines:\n"
-                + "   ./adb shell pm enable com.google.android.tvlauncher\n"
-                + "   ./adb shell pm enable com.google.android.tvrecommendations\n"
-                + "   ./adb shell pm enable com.google.android.tungsten.setupwraith\n\n"
-                + "3. Press Home and choose Google's home screen, then Always.\n\n"
-                + "Switch Google's home screen back on before uninstalling Sangha Home.\n\n"
-                + "Full guide: " + GUIDE_URL;
+    private void askClockZone() {
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        input.setSingleLine(true);
+        input.setHint("Town or city");
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(dp(24), dp(8), dp(24), 0);
+        box.addView(input);
+
+        String current = prefs.getString("clock_name", null);
+        String msg = "Showing: " + (prefs.contains("clock_tz") && current != null ? current : "Shield's time")
+                + "\n\nThis changes the clock on this screen only. The Shield's own time stays the same.";
+
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("How to restore")
-                .setMessage(intro + steps)
-                .setPositiveButton("Close", null)
+                .setTitle("Clock time zone")
+                .setMessage(msg)
+                .setView(box)
+                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), true))
+                .setNeutralButton("Use Shield's time", (d, w) -> {
+                    prefs.edit().remove("clock_tz").remove("clock_name").apply();
+                    applyClockZone();
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
@@ -2352,9 +2395,12 @@ public class MainActivity extends Activity {
 
     // ---------- Groups ----------
 
-    private String groupOf(String pkg) {
-        String saved = prefs.getString("group_" + pkg, null);
-        return saved != null ? saved : defaultGroup(pkg);
+    private String groupOf(String key) {
+        Folder f = folderForKey(key);
+        if (f != null) return f.group;
+        if (isFolderKey(key)) return TOOLS;
+        String saved = prefs.getString("group_" + key, null);
+        return saved != null ? saved : defaultGroup(key);
     }
 
     private String defaultGroup(String pkg) {
@@ -2376,8 +2422,22 @@ public class MainActivity extends Activity {
         return "Watch";
     }
 
-    private void chooseGroup(final String pkg) {
-        String current = groupOf(pkg);
+    private void setGroupPref(String pkg, String g) {
+        prefs.edit().putString("group_" + pkg, g).apply();
+    }
+
+    private void setGroup(String key, String g) {
+        Folder f = folderForKey(key);
+        if (f != null) {
+            f.group = g;
+            for (String p : f.apps) setGroupPref(p, g);
+        } else {
+            setGroupPref(key, g);
+        }
+    }
+
+    private void chooseGroup(final String key) {
+        String current = groupOf(key);
         final List<String> options = new ArrayList<>();
         final List<String> names = new ArrayList<>();
         for (String g : GROUP_ORDER) {
@@ -2389,11 +2449,211 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Move to group")
                 .setItems(names.toArray(new String[0]), (d, which) -> {
-                    prefs.edit().putString("group_" + pkg, options.get(which)).apply();
-                    saveAndRender(pkg);
+                    setGroup(key, options.get(which));
+                    saveAndRender(key);
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    // ---------- Folders ----------
+
+    private static boolean isFolderKey(String k) {
+        return k != null && k.startsWith(FOLDER_PREFIX);
+    }
+
+    private Folder folderForKey(String k) {
+        return isFolderKey(k) ? folders.get(k.substring(FOLDER_PREFIX.length())) : null;
+    }
+
+    private Folder folderOf(String pkg) {
+        for (Folder f : folders.values()) if (f.apps.contains(pkg)) return f;
+        return null;
+    }
+
+    private void loadFolders() {
+        folders.clear();
+        try {
+            JSONArray a = new JSONArray(prefs.getString("folders", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                Folder f = new Folder();
+                f.id = str(o, "id");
+                f.name = str(o, "name");
+                f.group = str(o, "group");
+                if (!Arrays.asList(GROUP_ORDER).contains(f.group)) f.group = TOOLS;
+                if (f.name.isEmpty()) f.name = "Folder";
+                JSONArray apps = o.optJSONArray("apps");
+                if (apps != null) for (int k = 0; k < apps.length(); k++) f.apps.add(apps.getString(k));
+                if (!f.id.isEmpty()) folders.put(f.id, f);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveFolders() {
+        JSONArray a = new JSONArray();
+        try {
+            for (Folder f : folders.values()) {
+                JSONObject o = new JSONObject();
+                o.put("id", f.id);
+                o.put("name", f.name);
+                o.put("group", f.group);
+                JSONArray apps = new JSONArray();
+                for (String p : f.apps) apps.put(p);
+                o.put("apps", apps);
+                a.put(o);
+            }
+        } catch (Exception ignored) {
+        }
+        prefs.edit().putString("folders", a.toString()).apply();
+    }
+
+    private void dropEmptyFolders() {
+        List<String> empty = new ArrayList<>();
+        for (Folder f : folders.values()) if (f.apps.isEmpty()) empty.add(f.id);
+        for (String id : empty) {
+            folders.remove(id);
+            grid.remove(FOLDER_PREFIX + id);
+        }
+    }
+
+    private void showFolderMenu(final Folder f, boolean includeOpen) {
+        final String key = FOLDER_PREFIX + f.id;
+        final List<String> opts = new ArrayList<>();
+        if (includeOpen) opts.add("Open");
+        opts.add("Move");
+        opts.add("Rename");
+        opts.add("Move to group");
+        opts.add("Remove folder (keeps the apps)");
+        opts.add("Cancel");
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(f.name)
+                .setItems(opts.toArray(new String[0]), (d, which) -> {
+                    String o = opts.get(which);
+                    if (o.equals("Open")) {
+                        openFolder(f);
+                    } else if (o.equals("Move")) {
+                        startMove(key);
+                    } else if (o.equals("Rename")) {
+                        askFolderName("Rename folder", f.name, name -> {
+                            f.name = name;
+                            saveAndRender(key);
+                        });
+                    } else if (o.equals("Move to group")) {
+                        chooseGroup(key);
+                    } else if (o.startsWith("Remove folder")) {
+                        removeFolder(f);
+                    }
+                })
+                .show();
+    }
+
+    private void askFolderName(String title, String current, final Consumer<String> done) {
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        input.setSingleLine(true);
+        input.setHint("Folder name");
+        input.setText(current);
+        input.setSelection(input.getText().length());
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(dp(24), dp(8), dp(24), 0);
+        box.addView(input);
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(title)
+                .setView(box)
+                .setPositiveButton("OK", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    done.accept(name.isEmpty() ? "Folder" : name);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void chooseFolder(final String pkg) {
+        final Folder current = folderOf(pkg);
+        final List<Folder> options = new ArrayList<>();
+        final List<String> names = new ArrayList<>();
+        names.add("+  New folder");
+        for (Folder f : folders.values()) {
+            if (f == current) continue;
+            options.add(f);
+            names.add(f.name + "   " + DOT + "   " + groupName(f.group));
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(current == null ? "Add to folder" : "Move to another folder")
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    if (which == 0) {
+                        askFolderName("New folder", "", name -> createFolderWith(pkg, name));
+                    } else {
+                        putInFolder(pkg, options.get(which - 1));
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void createFolderWith(String pkg, String name) {
+        Folder cur = folderOf(pkg);
+        Folder f = new Folder();
+        f.id = "f" + System.currentTimeMillis();
+        f.name = name;
+        f.group = cur != null ? cur.group : groupOf(pkg);
+        int idx;
+        if (cur != null) {
+            cur.apps.remove(pkg);
+            idx = grid.indexOf(FOLDER_PREFIX + cur.id) + 1;
+        } else {
+            idx = grid.indexOf(pkg);
+            grid.remove(pkg);
+        }
+        if (idx < 0 || idx > grid.size()) idx = grid.size();
+        String key = FOLDER_PREFIX + f.id;
+        grid.add(idx, key);
+        f.apps.add(pkg);
+        folders.put(f.id, f);
+        setGroupPref(pkg, f.group);
+        saveAndRender(key);
+    }
+
+    private void putInFolder(String pkg, Folder f) {
+        Folder cur = folderOf(pkg);
+        if (cur != null) cur.apps.remove(pkg);
+        grid.remove(pkg);
+        if (!f.apps.contains(pkg)) f.apps.add(pkg);
+        setGroupPref(pkg, f.group);
+        Toast.makeText(this, "Added to " + f.name, Toast.LENGTH_SHORT).show();
+        saveAndRender(FOLDER_PREFIX + f.id);
+    }
+
+    private void takeOutOfFolder(String pkg) {
+        Folder f = folderOf(pkg);
+        if (f == null) return;
+        f.apps.remove(pkg);
+        setGroupPref(pkg, f.group);
+        int idx = grid.indexOf(FOLDER_PREFIX + f.id);
+        grid.add(idx < 0 ? grid.size() : idx + 1, pkg);
+    }
+
+    private void removeFromFolder(String pkg) {
+        Folder f = folderOf(pkg);
+        if (f != null) f.apps.remove(pkg);
+    }
+
+    private void removeFolder(Folder f) {
+        String key = FOLDER_PREFIX + f.id;
+        int idx = grid.indexOf(key);
+        if (idx < 0) idx = grid.size();
+        grid.remove(key);
+        String first = null;
+        for (String p : f.apps) {
+            setGroupPref(p, f.group);
+            grid.add(Math.min(idx, grid.size()), p);
+            idx++;
+            if (first == null) first = p;
+        }
+        folders.remove(f.id);
+        saveAndRender(first);
     }
 
     // ---------- Arranging ----------
@@ -2408,25 +2668,70 @@ public class MainActivity extends Activity {
         for (String p : split(prefs.getString("hidden", ""))) {
             if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p)) hidden.add(p);
         }
-        for (String p : split(prefs.getString("order", ""))) {
-            if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !grid.contains(p)) grid.add(p);
+
+        // Folders keep only installed apps that aren't docked, hidden or already in another folder
+        loadFolders();
+        Set<String> inFolder = new HashSet<>();
+        for (Folder f : folders.values()) {
+            List<String> keep = new ArrayList<>();
+            for (String p : f.apps) {
+                if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p)) {
+                    keep.add(p);
+                    inFolder.add(p);
+                }
+            }
+            f.apps.clear();
+            f.apps.addAll(keep);
+        }
+
+        // First time with folders: put the rarely used tools into a "More tools" folder
+        if (!prefs.getBoolean("folders_init", false)) {
+            Folder f = new Folder();
+            f.id = "f" + System.currentTimeMillis();
+            f.name = "More tools";
+            f.group = TOOLS;
+            for (String p : DEFAULT_FOLDER_PKGS) {
+                if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p)) {
+                    f.apps.add(p);
+                    inFolder.add(p);
+                }
+            }
+            if (!f.apps.isEmpty()) folders.put(f.id, f);
+            prefs.edit().putBoolean("folders_init", true).apply();
+        }
+
+        for (String k : split(prefs.getString("order", ""))) {
+            if (grid.contains(k)) continue;
+            if (isFolderKey(k)) {
+                Folder f = folderForKey(k);
+                if (f != null && !f.apps.isEmpty()) grid.add(k);
+            } else if (installed.containsKey(k) && !dock.contains(k) && !hidden.contains(k) && !inFolder.contains(k)) {
+                grid.add(k);
+            }
+        }
+        for (Folder f : folders.values()) {
+            String k = FOLDER_PREFIX + f.id;
+            if (!f.apps.isEmpty() && !grid.contains(k)) grid.add(k);
         }
         for (String p : installed.keySet()) {
-            if (!dock.contains(p) && !hidden.contains(p) && !grid.contains(p)) grid.add(p);
+            if (!dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p) && !grid.contains(p)) grid.add(p);
         }
+        saveLayout();
     }
 
     private void saveLayout() {
+        dropEmptyFolders();
         prefs.edit()
                 .putString("dock", TextUtils.join(",", dock))
                 .putString("order", TextUtils.join(",", grid))
                 .putString("hidden", TextUtils.join(",", hidden))
                 .apply();
+        saveFolders();
     }
 
-    private void saveAndRender(String focusPkg) {
+    private void saveAndRender(String focusKey) {
         saveLayout();
-        render(focusPkg);
+        render(focusKey);
     }
 
     private void onAppClicked(String pkg) {
@@ -2443,11 +2748,13 @@ public class MainActivity extends Activity {
     private void showAppMenu(final String pkg, boolean includeOpen) {
         final boolean isDock = dock.contains(pkg);
         final boolean isHidden = hidden.contains(pkg);
-        final boolean inToolsFolder = !isDock && !isHidden && TOOLS.equals(groupOf(pkg));
+        final Folder inFolder = folderOf(pkg);
         final List<String> opts = new ArrayList<>();
         if (includeOpen) opts.add("Open");
-        if (!isHidden && !inToolsFolder) opts.add("Move");
-        if (!isHidden && !isDock) opts.add("Move to group");
+        if (!isHidden && inFolder == null) opts.add("Move");
+        if (!isHidden && !isDock && inFolder == null) opts.add("Move to group");
+        if (!isHidden && !isDock) opts.add(inFolder == null ? "Add to folder" : "Move to another folder");
+        if (inFolder != null) opts.add("Take out of folder");
         opts.add(isDock ? "Remove from dock" : "Add to dock");
         opts.add(isHidden ? "Unhide" : "Hide");
         opts.add("Cancel");
@@ -2463,7 +2770,13 @@ public class MainActivity extends Activity {
                         startMove(pkg);
                     } else if (o.equals("Move to group")) {
                         chooseGroup(pkg);
+                    } else if (o.equals("Add to folder") || o.equals("Move to another folder")) {
+                        chooseFolder(pkg);
+                    } else if (o.equals("Take out of folder")) {
+                        takeOutOfFolder(pkg);
+                        saveAndRender(pkg);
                     } else if (o.equals("Add to dock")) {
+                        removeFromFolder(pkg);
                         grid.remove(pkg);
                         hidden.remove(pkg);
                         dock.add(pkg);
@@ -2473,6 +2786,7 @@ public class MainActivity extends Activity {
                         grid.add(0, pkg);
                         saveAndRender(pkg);
                     } else if (o.equals("Hide")) {
+                        removeFromFolder(pkg);
                         dock.remove(pkg);
                         grid.remove(pkg);
                         hidden.add(pkg);
@@ -2486,11 +2800,11 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    private void startMove(String pkg) {
-        movingPkg = pkg;
+    private void startMove(String key) {
+        movingPkg = key;
         backupDock = new ArrayList<>(dock);
         backupGrid = new ArrayList<>(grid);
-        render(pkg);
+        render(key);
     }
 
     private void finishMove(boolean keep) {
@@ -2517,7 +2831,7 @@ public class MainActivity extends Activity {
             return;
         }
         String g = groupOf(movingPkg);
-        List<String> sub = pkgsInGroup(g);
+        List<String> sub = keysInGroup(g);
         int i = sub.indexOf(movingPkg);
         int j = i + delta;
         if (i < 0 || j < 0 || j >= sub.size()) return;
@@ -2527,7 +2841,7 @@ public class MainActivity extends Activity {
         List<String> rebuilt = new ArrayList<>();
         for (String grp : GROUP_ORDER) {
             if (grp.equals(g)) rebuilt.addAll(sub);
-            else rebuilt.addAll(pkgsInGroup(grp));
+            else rebuilt.addAll(keysInGroup(grp));
         }
         grid.clear();
         grid.addAll(rebuilt);
@@ -2567,7 +2881,7 @@ public class MainActivity extends Activity {
                 .setTitle("Weather location")
                 .setMessage("Weather data by Open-Meteo.com")
                 .setView(box)
-                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim()))
+                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), false))
                 .setNeutralButton("Remove weather", (d, w) -> {
                     prefs.edit().remove("wx_lat").remove("wx_lon").remove("wx_name").apply();
                     lastWeatherFetch = 0;
@@ -2577,7 +2891,8 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    private void searchPlace(final String q) {
+    // Looks up a place by name. Used for both the weather location and the clock time zone.
+    private void searchPlace(final String q, final boolean forClock) {
         if (q.isEmpty()) return;
         new Thread(() -> {
             try {
@@ -2588,6 +2903,7 @@ public class MainActivity extends Activity {
                 final List<String> names = new ArrayList<>();
                 final List<String> shortNames = new ArrayList<>();
                 final List<double[]> coords = new ArrayList<>();
+                final List<String> zones = new ArrayList<>();
                 if (res != null) {
                     for (int i = 0; i < res.length(); i++) {
                         JSONObject r = res.getJSONObject(i);
@@ -2600,6 +2916,7 @@ public class MainActivity extends Activity {
                         names.add(sb.toString());
                         shortNames.add(name);
                         coords.add(new double[]{r.getDouble("latitude"), r.getDouble("longitude")});
+                        zones.add(str(r, "timezone"));
                     }
                 }
                 runOnUiThread(() -> {
@@ -2610,13 +2927,27 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                             .setTitle("Which one?")
                             .setItems(names.toArray(new String[0]), (d, w) -> {
-                                prefs.edit()
-                                        .putFloat("wx_lat", (float) coords.get(w)[0])
-                                        .putFloat("wx_lon", (float) coords.get(w)[1])
-                                        .putString("wx_name", shortNames.get(w))
-                                        .apply();
-                                showWeatherPlaceholder();
-                                fetchWeather();
+                                if (forClock) {
+                                    String tz = zones.get(w);
+                                    if (tz.isEmpty()) {
+                                        Toast.makeText(this, "Couldn't find a time zone for that place.",
+                                                Toast.LENGTH_LONG).show();
+                                        return;
+                                    }
+                                    prefs.edit()
+                                            .putString("clock_tz", tz)
+                                            .putString("clock_name", shortNames.get(w))
+                                            .apply();
+                                    applyClockZone();
+                                } else {
+                                    prefs.edit()
+                                            .putFloat("wx_lat", (float) coords.get(w)[0])
+                                            .putFloat("wx_lon", (float) coords.get(w)[1])
+                                            .putString("wx_name", shortNames.get(w))
+                                            .apply();
+                                    showWeatherPlaceholder();
+                                    fetchWeather();
+                                }
                             })
                             .setNegativeButton("Cancel", null)
                             .show();
