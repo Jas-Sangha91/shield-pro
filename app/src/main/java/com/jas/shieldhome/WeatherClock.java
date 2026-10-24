@@ -83,18 +83,12 @@ final class WeatherClock {
                 .show();
     }
 
+    /** Sets the clock to the chosen time zone. The city name isn't shown under the date. */
     void applyClockZone() {
         String tz = a.prefs.getString("clock_tz", null);
         if (a.timeClock != null) a.timeClock.setTimeZone(tz);
         if (a.dateClock != null) a.dateClock.setTimeZone(tz);
-        if (a.clockPlaceView != null) {
-            if (tz != null) {
-                a.clockPlaceView.setText(a.prefs.getString("clock_name", ""));
-                a.clockPlaceView.setVisibility(View.VISIBLE);
-            } else {
-                a.clockPlaceView.setVisibility(View.GONE);
-            }
-        }
+        if (a.clockPlaceView != null) a.clockPlaceView.setVisibility(View.GONE);
     }
 
     // ---------- Place search (shared by weather and clock) ----------
