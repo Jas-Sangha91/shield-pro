@@ -164,7 +164,7 @@ final class DiscoverPage {
 
         TextView credit = new TextView(a);
         style(credit, 12, false, 0x80FFFFFF);
-        credit.setText("This product uses the TMDB API but is not endorsed or certified by TMDB.");
+        credit.setText("This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data from JustWatch.");
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(WRAP, WRAP);
         clp.topMargin = dp(28);
         clp.leftMargin = dp(12);
@@ -669,10 +669,12 @@ final class DiscoverPage {
         plp.rightMargin = dp(24);
         top.addView(poster, plp);
 
+        // Text area beside the poster: grows with the text so the buttons never overlap what's below
         LinearLayout info = new LinearLayout(a);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setClipChildren(false);
-        top.addView(info, new LinearLayout.LayoutParams(0, dp(210), 1f));
+        info.setMinimumHeight(dp(210));
+        top.addView(info, new LinearLayout.LayoutParams(0, WRAP, 1f));
 
         TextView title = new TextView(a);
         style(title, 26, true, 0xFFFFFFFF);
@@ -695,7 +697,7 @@ final class DiscoverPage {
         final TextView overview = new TextView(a);
         style(overview, 15, false, 0xFFFFFFFF);
         overview.setText(it.overview.isEmpty() ? "Loading details\u2026" : it.overview);
-        overview.setMaxLines(4);
+        overview.setMaxLines(3);
         overview.setEllipsize(TextUtils.TruncateAt.END);
         overview.setLineSpacing(0, 1.15f);
         overview.setPadding(0, dp(10), 0, 0);
@@ -708,7 +710,7 @@ final class DiscoverPage {
         cast.setEllipsize(TextUtils.TruncateAt.END);
         info.addView(cast, new LinearLayout.LayoutParams(MATCH, WRAP));
 
-        info.addView(new View(a), new LinearLayout.LayoutParams(1, 0, 1f));
+        info.addView(new View(a), new LinearLayout.LayoutParams(1, dp(12)));
 
         LinearLayout buttons = new LinearLayout(a);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
