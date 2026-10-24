@@ -28,6 +28,8 @@ import static com.jas.shieldhome.Tmdb.hasToken;
 import static com.jas.shieldhome.Tmdb.meta;
 import static com.jas.shieldhome.Tmdb.parseItem;
 import static com.jas.shieldhome.Tmdb.tmdbGet;
+import static com.jas.shieldhome.Ui.DOCK_GAP;
+import static com.jas.shieldhome.Ui.DOCK_W;
 import static com.jas.shieldhome.Ui.MATCH;
 import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
@@ -35,8 +37,8 @@ import static com.jas.shieldhome.Ui.WRAP;
 /**
  * Home wallpaper, Netflix style: sharp trending artwork across the top of the screen,
  * fading into a dark background before the lower rows. Darker on the left and top
- * so the tabs, clock and app names stay readable. A one-line caption top right says
- * what it is; press Play on the remote to open its info card. Home only.
+ * so the tabs, clock and app names stay readable. A one-line caption sits on the right,
+ * between the dock and the Watch row; press Play on the remote to open its info card. Home only.
  */
 final class Wallpaper {
 
@@ -122,7 +124,7 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // One-line caption, top right just under the date, lined up with the clock
+        // One-line caption on the right, between the dock and the Watch row (position set in placeCaption)
         caption = new TextView(a);
         a.style(caption, 13, false, CAP_DETAILS);
         caption.setSingleLine(true);
@@ -131,7 +133,7 @@ final class Wallpaper {
         caption.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         caption.setAlpha(0f);
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
-        clp.setMargins(0, a.dp(116), a.dp(48), 0);
+        clp.setMargins(0, a.dp(320), a.dp(48), 0);
         root.addView(caption, clp);
     }
 
@@ -242,6 +244,7 @@ final class Wallpaper {
             shown = it;
 
             caption.animate().alpha(0f).setDuration(400).withEndAction(() -> {
+                placeCaption();
                 caption.setText(captionFor(it));
                 caption.animate().alpha(1f).setDuration(700).start();
             }).start();
@@ -251,6 +254,28 @@ final class Wallpaper {
                 root.animate().alpha(1f).setDuration(600).start();
             }
         });
+    }
+
+    /**
+     * Puts the caption just below the dock, on the right. Works out the dock's height
+     * the same way the Home page does, so it follows if you add or remove dock apps.
+     */
+    private void placeCaption() {
+        int dockCount = a.layout != null ? a.layout.dock.size() : 0;
+        int topDp;
+        if (dockCount == 0) {
+            topDp = 176 + 14;
+        } else {
+            int avail = a.getResources().getConfiguration().screenWidthDp - 64 - 24;
+            int w = Math.min(DOCK_W, avail / dockCount - 2 * DOCK_GAP);
+            if (w < 110) w = 110;
+            int h = w * 9 / 16;
+            // header + content padding + dock margin + band padding + tile + band padding, then a small gap
+            topDp = 176 + 10 + 4 + 10 + DOCK_GAP + h + DOCK_GAP + 10 + 8;
+        }
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
+        lp.topMargin = a.dp(topDp);
+        caption.setLayoutParams(lp);
     }
 
     /** "Title · ★ 8.6 · 2025 · Series · Play for info", with the title bold and the hint dimmest. */
