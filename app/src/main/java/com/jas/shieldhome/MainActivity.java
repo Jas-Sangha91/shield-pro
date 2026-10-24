@@ -3,7 +3,10 @@ package com.jas.shieldhome;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -101,6 +104,7 @@ public class MainActivity extends Activity {
     private boolean idle = false;
     private List<String> backupDock = new ArrayList<>();
     private List<String> backupGrid = new ArrayList<>();
+    private BroadcastReceiver packageReceiver;
 
     private final Runnable weatherTick = new Runnable() {
         @Override
@@ -126,6 +130,14 @@ public class MainActivity extends Activity {
         }
     };
 
+    // Runs shortly after an app is installed, updated or removed
+    private final Runnable packageRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (movingPkg == null) refreshInstalled();
+        }
+    };
+
     // ---------- Lifecycle ----------
 
     @Override
@@ -147,6 +159,7 @@ public class MainActivity extends Activity {
         super.onResume();
         baseBg.setColors(timeOfDayColors());
         refreshInstalled();
+        registerPackageReceiver();
         handler.removeCallbacks(weatherTick);
         handler.post(weatherTick);
         vpn.register();
@@ -163,8 +176,10 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(weatherTick);
         handler.removeCallbacks(vpnTick);
         handler.removeCallbacks(idleRunnable);
+        handler.removeCallbacks(packageRefresh);
         discover.stopTicker();
         vpn.unregister();
+        unregisterPackageReceiver();
     }
 
     @Override
@@ -211,6 +226,39 @@ public class MainActivity extends Activity {
             }
         }
         return super.dispatchKeyEvent(e);
+    }
+
+    // ---------- Watching for app installs and updates ----------
+
+    private void registerPackageReceiver() {
+        if (packageReceiver != null) return;
+        packageReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context c, Intent i) {
+                handler.removeCallbacks(packageRefresh);
+                handler.postDelayed(packageRefresh, 1500);
+            }
+        };
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_PACKAGE_ADDED);
+        f.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        f.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        f.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        f.addDataScheme("package");
+        try {
+            registerReceiver(packageReceiver, f);
+        } catch (Exception e) {
+            packageReceiver = null;
+        }
+    }
+
+    private void unregisterPackageReceiver() {
+        if (packageReceiver == null) return;
+        try {
+            unregisterReceiver(packageReceiver);
+        } catch (Exception ignored) {
+        }
+        packageReceiver = null;
     }
 
     // ---------- Building the screen ----------
@@ -505,7 +553,14 @@ public class MainActivity extends Activity {
         for (String p : names) labels.put(p, found.get(p).loadLabel(pm).toString());
         Collections.sort(names, (x, y) -> labels.get(x).compareToIgnoreCase(labels.get(y)));
 
-        String sig = TextUtils.join(";", names);
+        // Include where each app is installed, which changes when an app updates,
+        // so updated apps get fresh names and banners
+        StringBuilder sb = new StringBuilder();
+        for (String p : names) {
+            String dir = found.get(p).activityInfo.applicationInfo.sourceDir;
+            sb.append(p).append('@').append(dir).append(';');
+        }
+        String sig = sb.toString();
         if (sig.equals(installedSignature)) return;
         installedSignature = sig;
 
