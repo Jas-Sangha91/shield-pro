@@ -1024,8 +1024,7 @@ public class MainActivity extends Activity {
                 "Clock time zone",
                 "Weather location",
                 "Home wallpaper: " + (wallpaperOn ? "On" : "Off"),
-                "Backup and restore",
-                "About"};
+                "Backup and restore"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Settings")
                 .setItems(opts, (d, which) -> {
@@ -1039,8 +1038,6 @@ public class MainActivity extends Activity {
                         wallpaper.setOn(!wallpaperOn);
                     } else if (which == 4) {
                         new Backup(this).openMenu();
-                    } else if (which == 5) {
-                        new About(this).show();
                     }
                 })
                 .show();
