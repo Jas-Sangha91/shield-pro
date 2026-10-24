@@ -1,6 +1,5 @@
 package com.jas.shieldhome;
 
-import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -30,9 +29,10 @@ import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
 
 /**
- * Trending artwork, lightly softened and dimmed, slowly rotating behind the Home page,
- * with a small caption saying what it is. Press Play on the remote to open its info card.
- * Home only: Apps and Discover keep their plain backgrounds.
+ * Home wallpaper, Netflix style: sharp trending artwork across the top of the screen,
+ * fading into a dark background before the lower rows. Darker on the left and top
+ * so the tabs, clock and app names stay readable. A small caption top right says
+ * what it is; press Play on the remote to open its info card. Home only.
  */
 final class Wallpaper {
 
@@ -40,9 +40,11 @@ final class Wallpaper {
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
     private static final long FADE_MS = 1500L;
 
-    // How soft the picture is: the image is shrunk to this width, then scaled back up.
-    // Smaller number = blurrier. 240 is a light blur.
-    private static final int SOFTEN_WIDTH = 240;
+    // The dark colour the artwork fades into
+    private static final int BG = 0xFF0A0D14;
+
+    // How much of the screen height the artwork covers (0.72 = 72%)
+    private static final float ART_HEIGHT = 0.72f;
 
     private final MainActivity a;
     private final FrameLayout root;
@@ -74,39 +76,63 @@ final class Wallpaper {
         this.a = a;
         root = new FrameLayout(a);
         root.setAlpha(0f);
+        root.setBackgroundColor(BG);
+
+        int artHeight = Math.round(a.getResources().getDisplayMetrics().heightPixels * ART_HEIGHT);
+        FrameLayout art = new FrameLayout(a);
+        root.addView(art, new FrameLayout.LayoutParams(MATCH, artHeight, Gravity.TOP));
 
         for (int i = 0; i < 2; i++) {
             ImageView iv = new ImageView(a);
             iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
             iv.setAlpha(0f);
-            root.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
+            art.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
             layers[i] = iv;
         }
 
-        // Dark layer on top: strongest behind the header, a little lighter in the middle
-        View scrim = new View(a);
-        scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xE60A0D14, 0xC70A0D14, 0xE00A0D14}));
-        root.addView(scrim, new FrameLayout.LayoutParams(MATCH, MATCH));
+        // A light dim over the whole picture, so the dock tiles stand out
+        View dim = new View(a);
+        dim.setBackgroundColor(0x330A0D14);
+        art.addView(dim, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Caption, bottom right: what the artwork is from
+        // Darker on the left, where the tabs, weather and app names are
+        View left = new View(a);
+        left.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0xF20A0D14, 0xA60A0D14, 0x1A0A0D14, 0x000A0D14}));
+        art.addView(left, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        // Darker along the top, behind the tabs and clock
+        View top = new View(a);
+        top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xB30A0D14, 0x000A0D14}));
+        art.addView(top, new FrameLayout.LayoutParams(MATCH, artHeight / 3, Gravity.TOP));
+
+        // Fades the bottom of the picture smoothly into the dark background
+        View bottom = new View(a);
+        bottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x000A0D14, 0x990A0D14, BG}));
+        art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
+
+        // Caption, top right under the clock: what the artwork is from
         caption = new LinearLayout(a);
         caption.setOrientation(LinearLayout.VERTICAL);
         caption.setGravity(Gravity.END);
         caption.setAlpha(0f);
         captionTitle = new TextView(a);
-        a.style(captionTitle, 14, true, 0xCCFFFFFF);
+        a.style(captionTitle, 16, true, 0xE6FFFFFF);
         captionTitle.setSingleLine(true);
         captionTitle.setEllipsize(TextUtils.TruncateAt.END);
         captionTitle.setMaxWidth(a.dp(420));
+        captionTitle.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         captionMeta = new TextView(a);
-        a.style(captionMeta, 12, false, 0x99FFFFFF);
+        a.style(captionMeta, 12, false, 0xB3FFFFFF);
         captionMeta.setSingleLine(true);
         captionMeta.setPadding(0, a.dp(2), 0, 0);
+        captionMeta.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         caption.addView(captionTitle, new LinearLayout.LayoutParams(WRAP, WRAP));
         caption.addView(captionMeta, new LinearLayout.LayoutParams(WRAP, WRAP));
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.END);
-        clp.setMargins(0, 0, a.dp(48), a.dp(24));
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
+        clp.setMargins(0, a.dp(136), a.dp(48), 0);
         root.addView(caption, clp);
     }
 
@@ -144,9 +170,14 @@ final class Wallpaper {
         update();
     }
 
-    /** The film or series currently behind the tiles, or null if the wallpaper isn't showing. */
+    /** True while a picture is actually on screen (used to soften the colour glow). */
+    boolean isShowingPicture() {
+        return showing() && hasImage;
+    }
+
+    /** The film or series currently on the wallpaper, or null if it isn't showing. */
     Item currentItem() {
-        return showing() && hasImage ? shown : null;
+        return isShowingPicture() ? shown : null;
     }
 
     private boolean showing() {
@@ -200,11 +231,12 @@ final class Wallpaper {
         if (items.isEmpty()) return;
         index = (index + 1) % items.size();
         final Item it = items.get(index);
-        a.images.fetchInto(TMDB_IMG + "w780" + it.backdrop, b -> {
+        // Full-quality image, no blur
+        a.images.fetchInto(TMDB_IMG + "w1280" + it.backdrop, b -> {
             if (b == null || !showing()) return;
             ImageView back = layers[1 - front];
             ImageView old = layers[front];
-            back.setImageBitmap(soften(b));
+            back.setImageBitmap(b);
             back.animate().alpha(1f).setDuration(FADE_MS).start();
             old.animate().alpha(0f).setDuration(FADE_MS).start();
             front = 1 - front;
@@ -221,17 +253,5 @@ final class Wallpaper {
                 root.animate().alpha(1f).setDuration(600).start();
             }
         });
-    }
-
-    /** Shrinks the image a little and scales it back up, which softens it lightly. */
-    private static Bitmap soften(Bitmap b) {
-        try {
-            int w = SOFTEN_WIDTH;
-            int h = Math.max(1, Math.round(w * b.getHeight() / (float) b.getWidth()));
-            Bitmap small = Bitmap.createScaledBitmap(b, w, h, true);
-            return Bitmap.createScaledBitmap(small, w * 4, h * 4, true);
-        } catch (Exception e) {
-            return b;
-        }
     }
 }
