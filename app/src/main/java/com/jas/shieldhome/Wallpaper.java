@@ -28,17 +28,15 @@ import static com.jas.shieldhome.Tmdb.hasToken;
 import static com.jas.shieldhome.Tmdb.meta;
 import static com.jas.shieldhome.Tmdb.parseItem;
 import static com.jas.shieldhome.Tmdb.tmdbGet;
-import static com.jas.shieldhome.Ui.DOCK_GAP;
-import static com.jas.shieldhome.Ui.DOCK_W;
 import static com.jas.shieldhome.Ui.MATCH;
 import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
 
 /**
  * Home wallpaper, Netflix style: sharp trending artwork across the top of the screen,
- * fading into a dark background before the lower rows. Darker on the left and top
- * so the tabs, clock and app names stay readable. A one-line caption sits on the right,
- * between the dock and the Watch row; press Play on the remote to open its info card. Home only.
+ * fading into a dark background before the lower rows. Darker on the left, along the top
+ * and behind the clock, so the tabs, weather, clock and app names stay readable on any picture.
+ * A one-line caption sits on the left under the weather; press Play to open its info card. Home only.
  */
 final class Wallpaper {
 
@@ -106,17 +104,27 @@ final class Wallpaper {
         dim.setBackgroundColor(0x330A0D14);
         art.addView(dim, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Darker on the left, where the tabs, weather and app names are
+        // Darker on the left, where the tabs, weather, caption and app names are
         View left = new View(a);
         left.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{0xF20A0D14, 0xA60A0D14, 0x1A0A0D14, 0x000A0D14}));
         art.addView(left, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Darker along the top, behind the tabs and clock
+        // Darker along the top, behind the tabs and clock (stronger and deeper for bright pictures)
         View top = new View(a);
         top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xB30A0D14, 0x000A0D14}));
-        art.addView(top, new FrameLayout.LayoutParams(MATCH, artHeight / 3, Gravity.TOP));
+                new int[]{0xD90A0D14, 0x660A0D14, 0x000A0D14}));
+        art.addView(top, new FrameLayout.LayoutParams(MATCH, Math.round(artHeight * 0.45f), Gravity.TOP));
+
+        // A soft dark patch behind the clock, top right, fading out with no edge
+        View clockShade = new View(a);
+        GradientDrawable patch = new GradientDrawable();
+        patch.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        patch.setGradientCenter(0.88f, 0.12f);
+        patch.setGradientRadius(a.dp(340));
+        patch.setColors(new int[]{0xCC0A0D14, 0x660A0D14, 0x000A0D14});
+        clockShade.setBackground(patch);
+        art.addView(clockShade, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         // Fades the bottom of the picture smoothly into the dark background
         View bottom = new View(a);
@@ -124,7 +132,7 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // One-line caption on the right, between the dock and the Watch row (position set in placeCaption)
+        // One-line caption on the left, directly under the weather and lined up with it
         caption = new TextView(a);
         a.style(caption, 13, false, CAP_DETAILS);
         caption.setSingleLine(true);
@@ -132,8 +140,8 @@ final class Wallpaper {
         caption.setMaxWidth(a.dp(560));
         caption.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         caption.setAlpha(0f);
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
-        clp.setMargins(0, a.dp(320), a.dp(48), 0);
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START);
+        clp.setMargins(a.dp(48), a.dp(98), 0, 0);
         root.addView(caption, clp);
     }
 
@@ -244,7 +252,6 @@ final class Wallpaper {
             shown = it;
 
             caption.animate().alpha(0f).setDuration(400).withEndAction(() -> {
-                placeCaption();
                 caption.setText(captionFor(it));
                 caption.animate().alpha(1f).setDuration(700).start();
             }).start();
@@ -254,28 +261,6 @@ final class Wallpaper {
                 root.animate().alpha(1f).setDuration(600).start();
             }
         });
-    }
-
-    /**
-     * Puts the caption just below the dock, on the right. Works out the dock's height
-     * the same way the Home page does, so it follows if you add or remove dock apps.
-     */
-    private void placeCaption() {
-        int dockCount = a.layout != null ? a.layout.dock.size() : 0;
-        int topDp;
-        if (dockCount == 0) {
-            topDp = 176 + 14;
-        } else {
-            int avail = a.getResources().getConfiguration().screenWidthDp - 64 - 24;
-            int w = Math.min(DOCK_W, avail / dockCount - 2 * DOCK_GAP);
-            if (w < 110) w = 110;
-            int h = w * 9 / 16;
-            // header + content padding + dock margin + band padding + tile + band padding, then a small gap
-            topDp = 176 + 10 + 4 + 10 + DOCK_GAP + h + DOCK_GAP + 10 + 8;
-        }
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) caption.getLayoutParams();
-        lp.topMargin = a.dp(topDp);
-        caption.setLayoutParams(lp);
     }
 
     /** "Title · ★ 8.6 · 2025 · Series · Play for info", with the title bold and the hint dimmest. */
