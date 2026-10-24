@@ -15,6 +15,8 @@ Last updated: 24 October 2026
 | Code folder | `app/src/main/java/com/jas/shieldhome/` |
 | App package | `com.jas.shieldhome` |
 | Latest APK | `https://github.com/Jas-Sangha91/shield-pro/releases/latest/download/sangha-home.apk` |
+| Normal APK size | About 80 KB (a few bytes means the download failed) |
+| Update command | `sangha-update` (in Terminal) |
 | Signing key | `app/sangha.keystore` (password `sanghahome`, alias `sangha`) — **never delete** |
 | Backup file on Shield | `/sdcard/Android/data/com.jas.shieldhome/files/sangha-home-backup.json` |
 
@@ -24,26 +26,51 @@ Last updated: 24 October 2026
 
 ### 1A. Make a change and build
 
-1. On GitHub, open the file in the code folder, click the pencil, paste the new version and commit to `main`.
+1. On GitHub, open the file, click the pencil, paste the new version and commit to `main`.
 2. **Before committing a long file, scroll to the bottom** and check it ends properly (usually a single `}` on its own line). Long pastes sometimes get cut off.
 3. Open the **Actions** tab and wait for the green tick.
 4. When a change touches several files, the builds in between may fail (red cross) or be cancelled (grey "!"). That's expected. Only the build after the **last** file matters.
 
-### 1B. Install from the Mac (preferred method)
+### 1B. Install from the Mac (preferred)
+
+After the green tick, in Terminal:
+
+```
+sangha-update
+```
+
+You should see `connected to 192.168.1.197:5555`, then `Downloaded … bytes` (around 80,000), then `Success`. Your layout, folders, My list and settings are all kept through updates.
+
+**If `sangha-update` ever goes missing** (for example on a new Mac), set it up again by pasting this into Terminal once:
+
+```
+cat >> ~/.zshrc <<'EOF'
+
+# Sangha Home: download the latest build and install it on the Shield
+sangha-update() {
+  cd ~/Downloads/platform-tools || return
+  ./adb connect 192.168.1.197:5555
+  curl -L -s -o ~/Downloads/sangha-home.apk https://github.com/Jas-Sangha91/shield-pro/releases/latest/download/sangha-home.apk
+  size=$(stat -f%z ~/Downloads/sangha-home.apk)
+  if [ "$size" -lt 10000 ]; then
+    echo "Download failed ($size bytes). Is the build finished?"
+    return 1
+  fi
+  echo "Downloaded $size bytes"
+  ./adb install -r ~/Downloads/sangha-home.apk
+}
+EOF
+source ~/.zshrc
+```
+
+**The long way** (what `sangha-update` does for you):
 
 ```
 cd ~/Downloads/platform-tools
 ./adb connect 192.168.1.197:5555
 curl -L -o ~/Downloads/sangha-home.apk https://github.com/Jas-Sangha91/shield-pro/releases/latest/download/sangha-home.apk
-ls -lh ~/Downloads/sangha-home.apk
 ./adb install -r ~/Downloads/sangha-home.apk
 ```
-
-- `connect` should say `connected to 192.168.1.197:5555`.
-- `ls` should show a size of a few MB. If it says something tiny like `9B`, the download failed, so don't install it.
-- `install` should end with `Success`.
-
-Your dock, folders, sections, Apps page choices, My list, recent searches, weather and clock settings are all kept through updates.
 
 ### 1C. Install on the Shield (backup method)
 
@@ -53,14 +80,18 @@ Open **Downloader** on the Shield, enter the latest APK link from the quick refe
 
 | What you see | What it means and what to do |
 |---|---|
-| `adb: no devices/emulators found` | The Mac isn't connected. Run `./adb connect 192.168.1.197:5555` first. |
+| `adb: no devices/emulators found` | The Mac isn't connected. Run `./adb connect 192.168.1.197:5555` (or just use `sangha-update`, which connects for you). |
 | `failed to connect` or `Connection refused` | Network debugging is off, the Shield is asleep, or its IP has changed. Wake the Shield and check Settings → Device Preferences → Developer options → Network debugging. |
 | `unauthorized` | Accept the "Allow debugging?" prompt on the TV and tick **Always allow from this computer**. |
 | `device offline` | Run `./adb disconnect`, then connect again. If that fails, run `./adb kill-server` and try again. |
-| Download is only a few bytes | The build hasn't finished or failed. Check the Actions tab. |
-| Build error `reached end of file while parsing` | A paste got cut off. Open the file named in the error and check the bottom. Re-paste it, or paste just the missing end. |
+| `Download failed (9 bytes)` | The build hasn't finished or failed. Check the Actions tab. |
+| Build error `reached end of file while parsing` | A paste got cut off. Open the file named in the error, check the bottom, and re-paste it or paste the missing end. |
+| Build error `cannot find symbol` | Usually a file is missing or out of date. Check every file from the last change was committed. |
+| Build fails after uploading an image | Files in `res/drawable` must be named in lower case with only letters, numbers and underscores (for example `tmdb_logo.png`). SVG files aren't allowed there. |
 | Any other build error | Open the failed run → the red step → copy the lines containing `error:`. They name the file and line number. |
-| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | The signing key has changed. Check `app/sangha.keystore` still exists. As a last resort, back up (section 3), restore Google's home screen (section 4B), `./adb uninstall com.jas.shieldhome`, install again, then restore the backup. |
+| Most apps disappear from Home and Apps | `AndroidManifest.xml` has lost its "see all apps" lines. See section 8. Don't back up until it's fixed. |
+| An app tile shows a code name and plain icon | The app updated and Sangha Home hadn't refreshed. This now fixes itself within seconds. If not, run `./adb shell am force-stop com.jas.shieldhome` and press Home. |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | The signing key has changed. Check `app/sangha.keystore` still exists. As a last resort: back up and copy to the Mac (section 3), restore Google's home screen (section 5B), `./adb uninstall com.jas.shieldhome`, install again, then restore the backup. |
 
 ### 1E. Going back to an earlier version
 
@@ -72,22 +103,39 @@ GitHub keeps every version of every file. Open the file → **History** → pick
 
 ### Top bar
 
-- **Left:** Search, then the **Home · Discover · Apps** tabs, then the weather (Home only).
+- **Left:** Search, then the **Home · Discover · Apps** tabs.
+- **Under the tabs (Home only):** the weather, then a small caption about the wallpaper.
 - **Right:** VPN city (only when connected), VPN button (green dot = on, amber = off; OK opens Surfshark), settings cog, then the clock and date.
-- **Big title:** shows the name of whatever is selected. It stays blank on the top row.
+- **Big title:** the name of whatever is selected. It stays blank on the top row.
 - **Back** from Discover or Apps returns to Home. The remote's Home button always brings you back to the Home page.
 
 ### Home page
 
-- **Dock:** your main apps along the top. Tiles shrink to fit if you add more.
+- **Dock:** your main apps along the top.
 - **Sections:** Watch, Play and Tools. Each can hold apps and folders.
 - **New apps** appear on Home automatically in their usual section.
+
+### Home wallpaper
+
+- Sharp trending film and series artwork across the top of the screen, fading into dark before the Watch row. It changes every 30 seconds.
+- Darker on the left and top, and behind the clock, so text stays readable on any picture.
+- **Caption** under the weather: title · rating · year · type · "Play for info".
+- **Press Play/Pause** on the remote to open that title's info card (trailer, Where to watch and so on).
+- The colour glow from the selected app is softened while artwork is showing.
+- **Home only.** Discover and Apps keep plain backgrounds.
+- **Switch it on or off:** cog → Home wallpaper.
+
+### Weather
+
+- One line: icon (sun by day, moon by night), temperature, place, conditions, then today's high and low.
+- **Highlight it and press OK** for the forecast card: now and "feels like", today's high, low, rain chance, sunrise and sunset, then the next 12 hours and the next 7 days.
+- Change the location: cog → Weather location.
 
 ### Hold OK on an app (Home)
 
 Open · Move · Move to group · Add to folder (or Move to another folder / Take out of folder) · Add to or Remove from dock · **Remove from Home** · Cancel
 
-When moving, use the arrows, press OK to drop, or Back to cancel. "Remove from Home" takes the app off Home but keeps it in the Apps page.
+When moving, use the arrows, press OK to drop, or Back to cancel.
 
 ### Folders
 
@@ -99,38 +147,47 @@ When moving, use the arrows, press OK to drop, or Back to cancel. "Remove from H
 ### Apps page
 
 - Every installed app, A to Z. A **green tick** means it's on Home.
-- The line under the big title shows where each app lives, for example "On Home · Watch · Kids folder" or "Not on Home".
-- **Hold OK:** Open · Add to Home (choose Watch, Play, Tools or a folder) · Add to or Remove from dock · Remove from Home.
+- The line under the big title shows where each app lives, for example "On Home · Watch · Kids folder".
+- **Hold OK:** Open · Add to Home (choose a section or folder) · Add to or Remove from dock · Remove from Home.
 
 ### Discover
 
 - **Tonight's pick:** five rotating picks with Trailer, My list and Surprise me.
-- **Rows:** My list, Trending this week, New and highly rated, Binge-worthy series, Tonight's mood (genre changes daily) and Coming soon. Refreshes every 3 hours.
+- **Rows:** My list, Trending this week, New and highly rated, Binge-worthy series, Tonight's mood and Coming soon.
 - **OK on a poster** opens the info card: rating, age rating, genres, length, cast, trailer, My list, **Where to watch** and More like this.
 - **Hold OK on a poster:** More info · Trailer · Add to or Remove from My list.
 
 ### Where to watch
 
-- Shows the UK services that have the title: Included, Free, Free with ads, Rent or Buy (data from JustWatch).
-- Services you have installed come first, and pressing OK opens the app. It opens the app itself, not the exact title, so use the app's own search from there.
-- Services you don't have are dimmed and marked "Not installed".
+- The UK services that have the title. Apps you have come first, and pressing OK opens the app (not the exact title, so use the app's own search).
+- Dimmed means the app isn't installed.
+- Only **Rent**, **Buy**, **Free** or **Free with ads** are labelled. No label means it's included with the subscription.
 
 ### Search
 
-Searches your apps instantly, plus every film and series. Recent searches show when the box is empty. Back hides the keyboard, and Back again closes Search.
+Searches your apps instantly, plus every film and series. Recent searches show when the box is empty.
 
 ### Cog menu
 
-1. **Shield settings:** opens the Shield's own settings.
-2. **Clock time zone:** shows another city's time on Sangha Home only, with the city's name under the date. **Use Shield's time** switches back. The Shield's own time is never changed.
-3. **Weather location:** search for a town or city, or remove the weather.
-4. **Backup and restore:** see section 3.
+1. **Shield settings**
+2. **Clock time zone:** shows another city's time on Sangha Home and the screensaver. The Shield's own time is unchanged. The city name isn't shown under the date.
+3. **Weather location**
+4. **Home wallpaper: On/Off**
+5. **Backup and restore** (section 3)
+6. **About:** credits for TMDB (with logo), JustWatch, Open-Meteo and ipwho.is, plus when the current version was installed.
 
-### Other touches
+### Screensaver
 
-- The background glow takes the colour of the selected item.
-- The background shifts with the time of day.
-- After 20 seconds idle, everything except the selected item dims.
+- Full-screen artwork that slowly drifts and fades every 20 seconds, with the title bottom left and the clock top right. The text shifts slightly each time to avoid burn-in.
+- **Turn it on:** Settings → Device Preferences → Screen saver → Screen saver → **Sangha Home artwork**. **Start now** previews it.
+- **If it's not in the list:**
+  ```
+  ./adb shell settings put secure screensaver_components com.jas.shieldhome/.ArtworkDream
+  ```
+- **Back to the original:** pick **Backdrop** in the same menu, or:
+  ```
+  ./adb shell settings put secure screensaver_components com.google.android.backdrop/.Backdrop
+  ```
 
 ---
 
@@ -140,15 +197,12 @@ Searches your apps instantly, plus every film and series. Recent searches show w
 
 Cog → **Backup and restore**:
 
-- **Back up now** saves your dock, sections, folders, which apps are on Home, My list, recent searches, weather and clock settings.
-- **Restore** puts them all back (it asks you to confirm first).
-- The menu shows when you last backed up.
+- **Back up now** saves the dock, sections, folders, apps on Home, My list, recent searches, weather, clock and wallpaper settings.
+- **Restore** puts them all back (it asks you to confirm).
 
-The backup on the Shield survives updates, but **not an uninstall**.
+The backup survives updates, but **not an uninstall**. Back up after any big layout change.
 
-### Copy the backup to the Mac
-
-After backing up on the Shield:
+### Copy it to the Mac
 
 ```
 cd ~/Downloads/platform-tools
@@ -165,13 +219,26 @@ Open Sangha Home once first, then:
 ./adb push ~/Downloads/sangha-home-backup.json /sdcard/Android/data/com.jas.shieldhome/files/
 ```
 
-Then use cog → Backup and restore → **Restore**.
+Then cog → Backup and restore → **Restore**.
+
+### If apps go missing for a while
+
+Sangha Home remembers where every app belongs even if it can't see it for a while (an update, a restart, a mistake). When the app comes back, it returns to its old place in the dock, section or folder.
 
 ---
 
-## 4. Default home screen
+## 4. Network debugging and security
 
-### 4A. What was done
+- **Network debugging stays on**, because updates and backups go through the Mac.
+- Only approve the "Allow debugging?" prompt for your own Mac.
+- To remove every approved computer: Settings → Device Preferences → Developer options → **Revoke debugging authorisations**.
+- **Tip:** reserve `192.168.1.197` for the Shield in your router (DHCP reservation), so the address never changes.
+
+---
+
+## 5. Default home screen
+
+### 5A. What was done
 
 ```
 ./adb shell cmd package set-home-activity com.jas.shieldhome/com.jas.shieldhome.MainActivity
@@ -182,9 +249,7 @@ Then use cog → Backup and restore → **Restore**.
 
 If a Shield system update ever brings Google's home screen back, run these again.
 
-### 4B. Restore Google's home screen
-
-Network debugging must be on. From the Mac:
+### 5B. Restore Google's home screen
 
 ```
 cd ~/Downloads/platform-tools
@@ -194,15 +259,13 @@ cd ~/Downloads/platform-tools
 ./adb shell pm enable com.google.android.tungsten.setupwraith
 ```
 
-Then press Home, choose Google's home screen, then **Always**.
-
-**Always restore Google's home screen before uninstalling Sangha Home**, or the Shield won't have a home screen.
+Then press Home, choose Google's home screen, then **Always**. **Always do this before uninstalling Sangha Home.**
 
 ---
 
-## 5. Debloat (Batch 1)
+## 6. Debloat (Batch 1)
 
-These were disabled and can be switched back on at any time:
+Disabled (can be switched back on at any time):
 
 `com.nvidia.stats`, `com.nvidia.feedback`, `com.google.android.feedback`, `com.nvidia.shieldbeta`, `com.nvidia.shield.beta`, `com.nvidia.shield.registration`, `com.nvidia.shield.welcome`, `com.nvidia.developerwidget`, `com.android.printspooler`
 
@@ -216,109 +279,125 @@ for p in com.nvidia.stats com.nvidia.feedback com.google.android.feedback com.nv
 
 ---
 
-## 6. Network debugging and security
-
-- **Network debugging stays on**, because updates and backups go through the Mac.
-- Only approve the "Allow debugging?" prompt for your own Mac. No other device on the Wi-Fi can connect without that approval on the TV.
-- To remove every approved computer: Settings → Device Preferences → Developer options → **Revoke debugging authorisations**. The Mac will ask again next time.
-- **Tip:** reserve `192.168.1.197` for the Shield in your router (often called DHCP reservation or static lease), so the address never changes.
-
----
-
 ## 7. The repository
 
 ### Code files (in `app/src/main/java/com/jas/shieldhome/`)
 
 | File | What it looks after |
 |---|---|
-| `MainActivity.java` | The screen, top bar, tabs, Home and Apps pages, app tiles, cog menu |
-| `Layout.java` | What's on Home and where: dock, sections, folders, apps off Home |
-| `Menus.java` | All the hold-OK menus for apps and folders |
+| `MainActivity.java` | The screen, top bar, tabs, Home and Apps pages, tiles, cog menu, Play/Pause shortcut |
+| `Layout.java` | What's on Home and where, including remembering missing apps |
+| `Menus.java` | All the hold-OK menus |
 | `DiscoverPage.java` | Discover, Tonight's pick, My list and the info card |
-| `WhereToWatch.java` | The "Where to watch" row on the info card |
+| `WhereToWatch.java` | The "Where to watch" row |
 | `SearchScreen.java` | Search |
-| `Tmdb.java` | Talking to TMDB (films and series data) |
-| `Images.java` | Downloading and caching posters and artwork |
-| `WeatherClock.java` | Weather and clock time zone |
+| `Wallpaper.java` | The Home wallpaper and its caption |
+| `ArtworkDream.java` | The screensaver |
+| `WeatherClock.java` | Weather, forecast card and clock time zone |
 | `VpnStatus.java` | The VPN button and city |
 | `Backup.java` | Backup and restore |
-| `Ui.java` | Shared colours, sizes and small helpers |
+| `About.java` | Cog → About |
+| `Tmdb.java` | Talking to TMDB |
+| `Images.java` | Downloading and caching artwork |
+| `Ui.java` | Shared colours, sizes and helpers |
 
 ### Other files
 
 | File | Purpose |
 |---|---|
-| `settings.gradle` | Project setup |
-| `build.gradle` | Android build tools version |
-| `app/build.gradle` | App settings, signing key, TMDB token |
-| `app/src/main/AndroidManifest.xml` | App name, banner, permissions, home screen category |
+| `app/src/main/AndroidManifest.xml` | App name, permissions, home screen and screensaver (see section 8) |
 | `app/src/main/res/drawable/banner.xml` | App banner |
-| `app/src/main/res/drawable/ic_cog.xml` | Settings icon |
-| `app/src/main/res/drawable/ic_shield.xml` | VPN icon |
-| `app/src/main/res/drawable/ic_search.xml` | Search icon |
+| `app/src/main/res/drawable/ic_cog.xml`, `ic_search.xml`, `ic_shield.xml` | Top bar icons |
+| `app/src/main/res/drawable/tmdb_logo.png` | TMDB logo for About (official file from TMDB's logos page) |
+| `app/build.gradle` | App settings, signing key, TMDB token |
 | `.github/workflows/build.yml` | Builds, signs and publishes each release |
 | `app/sangha.keystore` | Permanent signing key — **never delete** |
 | `GUIDE.md` | This guide |
 
-**GitHub secret:** `TMDB_TOKEN`, the TMDB API Read Access Token (starts with `eyJ`). Found under Settings → Secrets and variables → Actions.
+**GitHub secret:** `TMDB_TOKEN` (Settings → Secrets and variables → Actions).
 
-**Going private:** a private repository hides the code, keystore and TMDB token, but the `curl` download link stops working. Options at that point:
-
-- Switch to public briefly for each update, then back to private.
-- Or install the GitHub command-line tool once (`brew install gh`, then `gh auth login`) and download with:
-  ```
-  gh release download -R Jas-Sangha91/shield-pro -p sangha-home.apk -D ~/Downloads --clobber
-  ```
-  then run `./adb install -r ~/Downloads/sangha-home.apk` as usual.
+**Going private:** this hides the code, keystore and token, but the download link stops working. Either switch to public briefly for each update, or install GitHub's command-line tool (`brew install gh`, then `gh auth login`) and download with:
+```
+gh release download -R Jas-Sangha91/shield-pro -p sangha-home.apk -D ~/Downloads --clobber
+```
 
 ---
 
-## 8. Data sources
+## 8. AndroidManifest.xml — must keep
+
+Since Android 11, an app can only see other apps if its manifest says so. If these lines are ever lost, most apps vanish from Home and Apps (only the Shield's built-in ones remain). Keep:
+
+```xml
+<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+<queries>
+    <intent>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+</queries>
+```
+
+The manifest also holds the `INTERNET` and `ACCESS_NETWORK_STATE` permissions, the `MainActivity` home screen entries (HOME and LEANBACK_LAUNCHER), and the `ArtworkDream` screensaver service.
+
+---
+
+## 9. Data sources and credits
 
 | Feature | Source |
 |---|---|
-| Weather, place search, clock time zones | Open-Meteo.com (free, no key) |
-| VPN location | ipwho.is (free, no key) |
-| Discover and film search | TMDB (free for personal use). This product uses the TMDB API but is not endorsed or certified by TMDB. |
+| Discover, search, wallpaper and screensaver artwork | TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB. |
 | Where to watch | JustWatch, via TMDB |
+| Weather, forecast, place search, clock time zones | Open-Meteo.com |
+| VPN location | ipwho.is |
+
+Credits appear in cog → About and at the bottom of Discover.
 
 ---
 
-## 9. Samsung TV setup (still to do)
+## 10. Samsung TV setup (still to do)
 
 - Turn off Viewing Information Services and Interest-Based Advertising.
-- Disconnect the TV from the internet (forget the Wi-Fi network).
+- Disconnect the TV from the internet.
 - Turn off Smart Hub auto-start.
 - Turn on Anynet+ (HDMI-CEC) on the TV and CEC on the Shield.
 
 ---
 
-## 10. Change log
+## 11. Change log
 
 **24 October 2026**
 
-- Debloat Batch 1, and a permanent signing key so updates install over the top.
-- Home page with dock and Watch, Play and Tools sections.
-- Folders in any section, with a "More tools" folder created on first setup.
-- Hold-OK menus for apps, folders and posters.
-- Discover page with Tonight's pick, My list, daily mood row and info cards.
-- Full-screen search for apps, films and series, with recent searches.
-- VPN status with city, weather on Home only, and clock time zone option.
+- Debloat Batch 1 and a permanent signing key.
+- Home with dock, Watch, Play and Tools sections, and folders.
+- Hold-OK menus, Discover, Search, VPN status, weather and clock time zone.
 - Sangha Home made the default home screen.
-- Apps page listing every app, with "Remove from Home" replacing Hide.
-- Tabs reordered to Home · Discover · Apps.
-- Code split from one large file into smaller files, one per area.
-- "Where to watch" on the info card.
-- Backup and restore in the cog menu.
+- Apps page with "Remove from Home".
+- Code split into smaller files.
+- Where to watch, with simpler labels and the JustWatch credit moved to Discover and About.
+- Backup and restore, with copies to the Mac.
+- `sangha-update` one-command updates.
+- App tiles refresh automatically when an app updates.
+- Manifest fixed so all apps are visible (section 8).
+- Layout remembers missing apps and restores their places.
+- Home wallpaper: sharp artwork fading into dark, caption under the weather, Play for info, readable clock on bright pictures.
+- Screensaver with drifting artwork, title and clock.
+- Cog → About with TMDB logo and credits.
+- Weather: day and night icons, today's high and low, and a forecast card on OK.
+- City name removed from under the clock (Home and screensaver).
 
 ---
 
-## 11. Ideas and to-do
+## 12. Ideas and to-do
 
-- Home wallpaper rotating through Discover artwork, with an on/off switch.
-- Screensaver using Discover artwork.
+- Discover background that changes to match the highlighted poster (Netflix style).
+- Screensaver extras: left/right to skip, textless artwork and title logos.
 - Daily restart at 4am (on/off switch in the cog menu).
-- Voice search with the Nvidia remote mic (parked for now).
+- Voice search with the Nvidia remote mic (parked).
 - Keep the TMDB token out of the app and repository.
-- Decide whether to make the repository private (see section 7).
-- Fire TV Stick version (Fire OS models only, not Vega OS "Select" models).
+- Decide whether to make the repository private (section 7).
+- Fire TV Stick version (Fire OS models only).
