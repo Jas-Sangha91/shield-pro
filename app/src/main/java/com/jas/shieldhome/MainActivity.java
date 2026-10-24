@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     WeatherClock weather;
     VpnStatus vpn;
     Menus menus;
+    Wallpaper wallpaper;
 
     LinearLayout content;
     TextView titleView, metaView, weatherView, placeView, vpnCityView, clockPlaceView;
@@ -151,6 +152,7 @@ public class MainActivity extends Activity {
         weather = new WeatherClock(this);
         vpn = new VpnStatus(this);
         menus = new Menus(this);
+        wallpaper = new Wallpaper(this);
         buildScreen();
     }
 
@@ -167,6 +169,7 @@ public class MainActivity extends Activity {
         handler.post(vpnTick);
         discover.stopTicker();
         if (page == PAGE_DISCOVER) discover.startTicker();
+        wallpaper.start();
         resetIdle();
     }
 
@@ -178,6 +181,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(idleRunnable);
         handler.removeCallbacks(packageRefresh);
         discover.stopTicker();
+        wallpaper.stop();
         vpn.unregister();
         unregisterPackageReceiver();
     }
@@ -267,6 +271,9 @@ public class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         baseBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, timeOfDayColors());
         root.setBackground(baseBg);
+
+        // Artwork wallpaper (Home only), behind everything else
+        root.addView(wallpaper.view(), new FrameLayout.LayoutParams(MATCH, MATCH));
 
         // Soft glow that takes the colour of the selected item
         glow = new GradientDrawable();
@@ -604,8 +611,9 @@ public class MainActivity extends Activity {
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather shows on Home only
+        // Weather and wallpaper show on Home only
         if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
+        wallpaper.setHomeVisible(page == PAGE_HOME);
 
         if (page == PAGE_DISCOVER) {
             discover.render();
@@ -1010,7 +1018,14 @@ public class MainActivity extends Activity {
     // ---------- Settings menu ----------
 
     private void openSettingsMenu() {
-        String[] opts = {"Shield settings", "Clock time zone", "Weather location", "Backup and restore"};
+        final boolean wallpaperOn = wallpaper.isOn();
+        String[] opts = {
+                "Shield settings",
+                "Clock time zone",
+                "Weather location",
+                "Home wallpaper: " + (wallpaperOn ? "On" : "Off"),
+                "Backup and restore",
+                "About"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Settings")
                 .setItems(opts, (d, which) -> {
@@ -1021,7 +1036,11 @@ public class MainActivity extends Activity {
                     } else if (which == 2) {
                         weather.askWeatherPlace();
                     } else if (which == 3) {
+                        wallpaper.setOn(!wallpaperOn);
+                    } else if (which == 4) {
                         new Backup(this).openMenu();
+                    } else if (which == 5) {
+                        new About(this).show();
                     }
                 })
                 .show();
@@ -1036,6 +1055,7 @@ public class MainActivity extends Activity {
         weather.showPlaceholder();
         weather.fetch();
         weather.applyClockZone();
+        wallpaper.start();
     }
 
     // ---------- Small helpers ----------
