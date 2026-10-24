@@ -1,12 +1,16 @@
 package com.jas.shieldhome;
 
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.jas.shieldhome.Tmdb.Item;
@@ -31,7 +35,7 @@ import static com.jas.shieldhome.Ui.WRAP;
 /**
  * Home wallpaper, Netflix style: sharp trending artwork across the top of the screen,
  * fading into a dark background before the lower rows. Darker on the left and top
- * so the tabs, clock and app names stay readable. A small caption top right says
+ * so the tabs, clock and app names stay readable. A one-line caption top right says
  * what it is; press Play on the remote to open its info card. Home only.
  */
 final class Wallpaper {
@@ -46,11 +50,16 @@ final class Wallpaper {
     // How much of the screen height the artwork covers (0.72 = 72%)
     private static final float ART_HEIGHT = 0.72f;
 
+    // Caption colours: title brightest, details softer, hint dimmest (no pure white, which is harsh on TVs)
+    private static final int CAP_TITLE = 0xF2F1F1F1;
+    private static final int CAP_DETAILS = 0xBFF1F1F1;
+    private static final int CAP_HINT = 0x80F1F1F1;
+    private static final String GAP = "  \u00B7  ";
+
     private final MainActivity a;
     private final FrameLayout root;
     private final ImageView[] layers = new ImageView[2];
-    private final LinearLayout caption;
-    private final TextView captionTitle, captionMeta;
+    private final TextView caption;
     private int front = 0;
 
     private final List<Item> items = new ArrayList<>();
@@ -113,26 +122,16 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // Caption, top right under the clock: what the artwork is from
-        caption = new LinearLayout(a);
-        caption.setOrientation(LinearLayout.VERTICAL);
-        caption.setGravity(Gravity.END);
+        // One-line caption, top right just under the date, lined up with the clock
+        caption = new TextView(a);
+        a.style(caption, 13, false, CAP_DETAILS);
+        caption.setSingleLine(true);
+        caption.setEllipsize(TextUtils.TruncateAt.END);
+        caption.setMaxWidth(a.dp(560));
+        caption.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         caption.setAlpha(0f);
-        captionTitle = new TextView(a);
-        a.style(captionTitle, 16, true, 0xE6FFFFFF);
-        captionTitle.setSingleLine(true);
-        captionTitle.setEllipsize(TextUtils.TruncateAt.END);
-        captionTitle.setMaxWidth(a.dp(420));
-        captionTitle.setShadowLayer(8f, 0f, 2f, 0xCC000000);
-        captionMeta = new TextView(a);
-        a.style(captionMeta, 12, false, 0xB3FFFFFF);
-        captionMeta.setSingleLine(true);
-        captionMeta.setPadding(0, a.dp(2), 0, 0);
-        captionMeta.setShadowLayer(8f, 0f, 2f, 0xCC000000);
-        caption.addView(captionTitle, new LinearLayout.LayoutParams(WRAP, WRAP));
-        caption.addView(captionMeta, new LinearLayout.LayoutParams(WRAP, WRAP));
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
-        clp.setMargins(0, a.dp(136), a.dp(48), 0);
+        clp.setMargins(0, a.dp(116), a.dp(48), 0);
         root.addView(caption, clp);
     }
 
@@ -243,8 +242,7 @@ final class Wallpaper {
             shown = it;
 
             caption.animate().alpha(0f).setDuration(400).withEndAction(() -> {
-                captionTitle.setText(it.title);
-                captionMeta.setText(meta(it) + SEP + "Press Play for info");
+                caption.setText(captionFor(it));
                 caption.animate().alpha(1f).setDuration(700).start();
             }).start();
 
@@ -253,5 +251,21 @@ final class Wallpaper {
                 root.animate().alpha(1f).setDuration(600).start();
             }
         });
+    }
+
+    /** "Title · ★ 8.6 · 2025 · Series · Play for info", with the title bold and the hint dimmest. */
+    private CharSequence captionFor(Item it) {
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        int start = sb.length();
+        sb.append(it.title);
+        sb.setSpan(new StyleSpan(Typeface.BOLD), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new ForegroundColorSpan(CAP_TITLE), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+        sb.append(GAP).append(meta(it).replace(SEP, GAP));
+
+        start = sb.length();
+        sb.append(GAP).append("Play for info");
+        sb.setSpan(new ForegroundColorSpan(CAP_HINT), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
     }
 }
