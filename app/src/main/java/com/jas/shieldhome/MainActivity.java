@@ -224,7 +224,7 @@ public class MainActivity extends Activity {
             return true;
         }
 
-        // Play/Pause on Home or Apps opens the info card for the film or series on the wallpaper
+        // Play/Pause on Home opens the info card for the film or series on the wallpaper
         if (isPlayKey(e.getKeyCode())) {
             if (e.getAction() == KeyEvent.ACTION_UP && swallowPlayUp) {
                 swallowPlayUp = false;
@@ -298,7 +298,7 @@ public class MainActivity extends Activity {
         baseBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, timeOfDayColors());
         root.setBackground(baseBg);
 
-        // Artwork wallpaper (Home and Apps), behind everything else
+        // Artwork wallpaper (Home only), behind everything else
         root.addView(wallpaper.view(), new FrameLayout.LayoutParams(MATCH, MATCH));
 
         // Soft glow that takes the colour of the selected item
@@ -540,7 +540,9 @@ public class MainActivity extends Activity {
     }
 
     void setGlow(int color) {
-        int target = (color & 0x00FFFFFF) | 0x55000000;
+        // Much softer over the wallpaper, so the artwork keeps its own colours
+        int strength = (wallpaper != null && wallpaper.isShowingPicture()) ? 0x1F000000 : 0x55000000;
+        int target = (color & 0x00FFFFFF) | strength;
         if (glowAnim != null) glowAnim.cancel();
         glowAnim = ValueAnimator.ofArgb(glowColor, target);
         glowAnim.setDuration(450);
@@ -637,9 +639,9 @@ public class MainActivity extends Activity {
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather on Home only; wallpaper on Home and Apps
+        // Weather and wallpaper on Home only
         if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
-        wallpaper.setShownOnPage(page != PAGE_DISCOVER);
+        wallpaper.setShownOnPage(page == PAGE_HOME);
 
         if (page == PAGE_DISCOVER) {
             discover.render();
