@@ -149,7 +149,7 @@ public class ArtworkDream extends DreamService {
         cap.setMargins(dp(64), 0, dp(64), dp(56));
         root.addView(caption, cap);
 
-        // Clock, top right (uses Sangha Home's clock time zone if one is set)
+        // Clock, top right (uses Sangha Home's clock time zone if one is set; no city name shown)
         SharedPreferences prefs = getSharedPreferences("home", MODE_PRIVATE);
         String tz = prefs.getString("clock_tz", null);
         clockBox = new LinearLayout(this);
@@ -171,13 +171,6 @@ public class ArtworkDream extends DreamService {
         date.setTimeZone(tz);
         clockBox.addView(time, new LinearLayout.LayoutParams(WRAP, WRAP));
         clockBox.addView(date, new LinearLayout.LayoutParams(WRAP, WRAP));
-        if (tz != null) {
-            TextView place = new TextView(this);
-            style(place, 16, false, SOFT_TEXT);
-            place.setText(prefs.getString("clock_name", ""));
-            place.setPadding(0, dp(2), 0, 0);
-            clockBox.addView(place, new LinearLayout.LayoutParams(WRAP, WRAP));
-        }
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
         clp.setMargins(0, dp(48), dp(64), 0);
         root.addView(clockBox, clp);
