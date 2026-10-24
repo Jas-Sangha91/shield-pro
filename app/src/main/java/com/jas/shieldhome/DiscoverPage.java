@@ -593,6 +593,8 @@ final class DiscoverPage {
                 a.metaView.setText(meta(it));
                 Drawable dr = iv.getDrawable();
                 a.setGlow(dr != null ? dominantColor(dr, NEUTRAL_GLOW) : NEUTRAL_GLOW);
+                // The background follows the highlighted poster
+                a.wallpaper.follow(it);
             }
         });
         t.setOnClickListener(v -> onClick.run());
