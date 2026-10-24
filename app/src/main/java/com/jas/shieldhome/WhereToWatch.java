@@ -29,12 +29,15 @@ import static com.jas.shieldhome.Ui.SOFT_TEXT;
 import static com.jas.shieldhome.Ui.WRAP;
 import static com.jas.shieldhome.Ui.str;
 
-/** "Where to watch" on the info card: UK streaming services from TMDB (data from JustWatch). */
+/**
+ * "Where to watch" on the info card: UK streaming services from TMDB.
+ * Streaming data comes from JustWatch (credited at the bottom of Discover).
+ */
 final class WhereToWatch {
 
-    // TMDB's categories, in the order we show them
+    // TMDB's categories, in the order we show them. Blank labels aren't shown on the pill.
     private static final String[][] KINDS = {
-            {"flatrate", "Included"},
+            {"flatrate", ""},
             {"free", "Free"},
             {"ads", "Free with ads"},
             {"rent", "Rent"},
@@ -55,19 +58,11 @@ final class WhereToWatch {
         root.setClipChildren(false);
         root.setClipToPadding(false);
 
-        LinearLayout head = new LinearLayout(a);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(0, a.dp(14), 0, a.dp(2));
         TextView title = new TextView(a);
         a.style(title, 15, true, 0xA0FFFFFF);
         title.setText("Where to watch");
-        TextView credit = new TextView(a);
-        a.style(credit, 12, false, 0x80FFFFFF);
-        credit.setText("   " + DOT + "   Data from JustWatch");
-        head.addView(title, new LinearLayout.LayoutParams(WRAP, WRAP));
-        head.addView(credit, new LinearLayout.LayoutParams(WRAP, WRAP));
-        root.addView(head, new LinearLayout.LayoutParams(WRAP, WRAP));
+        title.setPadding(0, a.dp(14), 0, a.dp(2));
+        root.addView(title, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         row = new LinearLayout(a);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -176,7 +171,7 @@ final class WhereToWatch {
         final TextView label = new TextView(a);
         a.style(label, 14, false, 0xFFFFFFFF);
         label.setSingleLine(true);
-        label.setText(name + "  " + DOT + "  " + kind + (installed ? "" : "  " + DOT + "  Not installed"));
+        label.setText(kind.isEmpty() ? name : name + "  " + DOT + "  " + kind);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(WRAP, WRAP);
         llp.leftMargin = a.dp(8);
         pill.addView(label, llp);
@@ -194,6 +189,7 @@ final class WhereToWatch {
                 a.launch(pkg);
             });
         } else {
+            // Dimmed means the app isn't installed
             pill.setAlpha(0.45f);
         }
 
