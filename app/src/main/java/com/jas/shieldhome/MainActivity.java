@@ -347,10 +347,22 @@ public class MainActivity extends Activity {
         tabs.addView(tabApps, new LinearLayout.LayoutParams(WRAP, WRAP));
         topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
 
+        // Weather: one line; highlight it and press OK for the full forecast
         weatherRow = new LinearLayout(this);
         weatherRow.setOrientation(LinearLayout.HORIZONTAL);
         weatherRow.setGravity(Gravity.CENTER_VERTICAL);
-        weatherRow.setPadding(dp(6), dp(12), 0, 0);
+        weatherRow.setPadding(dp(8), dp(4), dp(12), dp(4));
+        final GradientDrawable weatherBg = new GradientDrawable();
+        weatherBg.setCornerRadius(dp(14));
+        weatherBg.setColor(0x00000000);
+        weatherRow.setBackground(weatherBg);
+        weatherRow.setFocusable(true);
+        weatherRow.setClickable(true);
+        weatherRow.setOnFocusChangeListener((v, f) -> {
+            weatherBg.setColor(f ? 0x33FFFFFF : 0x00000000);
+            if (f) topRowFocused();
+        });
+        weatherRow.setOnClickListener(v -> weather.openForecast());
         weatherView = new TextView(this);
         style(weatherView, 18, false, 0xFFFFFFFF);
         placeView = new TextView(this);
@@ -358,7 +370,9 @@ public class MainActivity extends Activity {
         placeView.setPadding(dp(10), 0, 0, 0);
         weatherRow.addView(weatherView, new LinearLayout.LayoutParams(WRAP, WRAP));
         weatherRow.addView(placeView, new LinearLayout.LayoutParams(WRAP, WRAP));
-        topLeft.addView(weatherRow, new LinearLayout.LayoutParams(WRAP, WRAP));
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        wlp.topMargin = dp(6);
+        topLeft.addView(weatherRow, wlp);
 
         header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
@@ -532,7 +546,7 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** The top row (search, tabs, VPN, cog) leaves the big title blank. */
+    /** The top row (search, tabs, weather, VPN, cog) leaves the big title blank. */
     private void topRowFocused() {
         titleView.setText(" ");
         metaView.setText("");
@@ -639,8 +653,11 @@ public class MainActivity extends Activity {
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather and wallpaper on Home only
-        if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
+        // Weather and wallpaper on Home only (the weather can only be selected on Home)
+        if (weatherRow != null) {
+            weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
+            weatherRow.setFocusable(page == PAGE_HOME);
+        }
         wallpaper.setShownOnPage(page == PAGE_HOME);
 
         if (page == PAGE_DISCOVER) {
