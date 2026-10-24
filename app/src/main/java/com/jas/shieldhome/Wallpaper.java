@@ -30,14 +30,19 @@ import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
 
 /**
- * Trending artwork, softly blurred and dimmed, slowly rotating behind the Home and Apps pages,
+ * Trending artwork, lightly softened and dimmed, slowly rotating behind the Home page,
  * with a small caption saying what it is. Press Play on the remote to open its info card.
+ * Home only: Apps and Discover keep their plain backgrounds.
  */
 final class Wallpaper {
 
     private static final long EVERY_MS = 30 * 1000L;
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
     private static final long FADE_MS = 1500L;
+
+    // How soft the picture is: the image is shrunk to this width, then scaled back up.
+    // Smaller number = blurrier. 240 is a light blur.
+    private static final int SOFTEN_WIDTH = 240;
 
     private final MainActivity a;
     private final FrameLayout root;
@@ -128,8 +133,12 @@ final class Wallpaper {
         a.handler.removeCallbacks(tick);
     }
 
-    /** Shown on Home and Apps, hidden on Discover. */
-    void setShownOnPage(boolean show) {
+    /**
+     * Called whenever the page changes. The wallpaper only shows on Home,
+     * whatever value is passed in.
+     */
+    void setShownOnPage(boolean ignored) {
+        boolean show = a.page == MainActivity.PAGE_HOME;
         if (onPage == show) return;
         onPage = show;
         update();
@@ -191,8 +200,7 @@ final class Wallpaper {
         if (items.isEmpty()) return;
         index = (index + 1) % items.size();
         final Item it = items.get(index);
-        // A small image, softened further, gives a gentle out-of-focus look
-        a.images.fetchInto(TMDB_IMG + "w300" + it.backdrop, b -> {
+        a.images.fetchInto(TMDB_IMG + "w780" + it.backdrop, b -> {
             if (b == null || !showing()) return;
             ImageView back = layers[1 - front];
             ImageView old = layers[front];
@@ -215,11 +223,13 @@ final class Wallpaper {
         });
     }
 
-    /** Shrinks the image and scales it back up, which blurs it softly. */
+    /** Shrinks the image a little and scales it back up, which softens it lightly. */
     private static Bitmap soften(Bitmap b) {
         try {
-            Bitmap tiny = Bitmap.createScaledBitmap(b, 80, 45, true);
-            return Bitmap.createScaledBitmap(tiny, 320, 180, true);
+            int w = SOFTEN_WIDTH;
+            int h = Math.max(1, Math.round(w * b.getHeight() / (float) b.getWidth()));
+            Bitmap small = Bitmap.createScaledBitmap(b, w, h, true);
+            return Bitmap.createScaledBitmap(small, w * 4, h * 4, true);
         } catch (Exception e) {
             return b;
         }
