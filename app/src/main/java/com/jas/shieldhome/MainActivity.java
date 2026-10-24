@@ -31,6 +31,7 @@ import android.widget.TextClock;
 import android.widget.TextView;
 
 import com.jas.shieldhome.Layout.Folder;
+import com.jas.shieldhome.Tmdb.Item;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -102,6 +103,7 @@ public class MainActivity extends Activity {
     private String installedSignature = "";
     private String movingPkg = null;
     private boolean swallowBackUp = false;
+    private boolean swallowPlayUp = false;
     private boolean idle = false;
     private List<String> backupDock = new ArrayList<>();
     private List<String> backupGrid = new ArrayList<>();
@@ -208,6 +210,12 @@ public class MainActivity extends Activity {
         // Otherwise this is the home screen, so Back does nothing.
     }
 
+    private static boolean isPlayKey(int code) {
+        return code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                || code == KeyEvent.KEYCODE_MEDIA_PAUSE;
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         if (e.getAction() == KeyEvent.ACTION_DOWN) resetIdle();
@@ -215,6 +223,24 @@ public class MainActivity extends Activity {
             swallowBackUp = false;
             return true;
         }
+
+        // Play/Pause on Home or Apps opens the info card for the film or series on the wallpaper
+        if (isPlayKey(e.getKeyCode())) {
+            if (e.getAction() == KeyEvent.ACTION_UP && swallowPlayUp) {
+                swallowPlayUp = false;
+                return true;
+            }
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0
+                    && movingPkg == null && page != PAGE_DISCOVER) {
+                Item it = wallpaper.currentItem();
+                if (it != null) {
+                    swallowPlayUp = true;
+                    discover.openInfo(it);
+                    return true;
+                }
+            }
+        }
+
         if (movingPkg != null && e.getAction() == KeyEvent.ACTION_DOWN) {
             boolean inDock = layout.dock.contains(movingPkg);
             switch (e.getKeyCode()) {
@@ -272,7 +298,7 @@ public class MainActivity extends Activity {
         baseBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, timeOfDayColors());
         root.setBackground(baseBg);
 
-        // Artwork wallpaper (Home only), behind everything else
+        // Artwork wallpaper (Home and Apps), behind everything else
         root.addView(wallpaper.view(), new FrameLayout.LayoutParams(MATCH, MATCH));
 
         // Soft glow that takes the colour of the selected item
@@ -611,9 +637,9 @@ public class MainActivity extends Activity {
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather and wallpaper show on Home only
+        // Weather on Home only; wallpaper on Home and Apps
         if (weatherRow != null) weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
-        wallpaper.setHomeVisible(page == PAGE_HOME);
+        wallpaper.setShownOnPage(page != PAGE_DISCOVER);
 
         if (page == PAGE_DISCOVER) {
             discover.render();
