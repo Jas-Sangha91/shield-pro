@@ -12,6 +12,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 /** Downloads posters and artwork in the background and keeps recent ones in memory. */
 final class Images {
@@ -65,6 +66,20 @@ final class Images {
             main.post(() -> {
                 if (url.equals(into.getTag())) into.setImageBitmap(b);
             });
+        });
+    }
+
+    /** Downloads an image and hands it over when ready (null if it couldn't be loaded). */
+    void fetchInto(final String url, final Consumer<Bitmap> done) {
+        Bitmap cached = cache.get(url);
+        if (cached != null) {
+            done.accept(cached);
+            return;
+        }
+        pool.execute(() -> {
+            Bitmap b = fetch(url);
+            if (b != null) cache.put(url, b);
+            main.post(() -> done.accept(b));
         });
     }
 }
