@@ -20,7 +20,13 @@ import static com.jas.shieldhome.Ui.str;
 
 /**
  * What's on Home and where: the dock, the sections, folders, and apps that are off Home.
- * Only data lives here. The screen is drawn by MainActivity, and changes are saved with save().
+ *
+ * Two versions are kept:
+ *  - the lists below (dock, grid, hidden, folders) hold only apps that are installed right now,
+ *    and are what the screen shows;
+ *  - the saved version also remembers where any missing apps belong, so if an app briefly
+ *    disappears (an update, a Shield restart, a mistake), it goes straight back to its old
+ *    place when it returns instead of being forgotten.
  */
 final class Layout {
 
@@ -75,10 +81,19 @@ final class Layout {
         final List<String> apps = new ArrayList<>();
     }
 
+    // What the screen shows: installed apps only
     final List<String> dock = new ArrayList<>();
     final List<String> grid = new ArrayList<>();   // app packages and folder keys, in order
     final List<String> hidden = new ArrayList<>(); // apps not on Home (still listed in Apps)
     final Map<String, Folder> folders = new LinkedHashMap<>();
+
+    // The saved version, including where missing apps belong
+    private List<String> savedDock = new ArrayList<>();
+    private List<String> savedOrder = new ArrayList<>();
+    private List<String> savedHidden = new ArrayList<>();
+    private Map<String, Folder> savedFolders = new LinkedHashMap<>();
+    // Folders whose apps are all missing right now: not shown, but kept
+    private final Set<String> waitingFolders = new HashSet<>();
 
     private final SharedPreferences prefs;
     private final Map<String, ResolveInfo> installed;
@@ -94,26 +109,35 @@ final class Layout {
         dock.clear();
         grid.clear();
         hidden.clear();
-        String savedDock = prefs.getString("dock", null);
-        List<String> d = savedDock == null ? Arrays.asList(DEFAULT_DOCK) : split(savedDock);
-        for (String p : d) if (installed.containsKey(p) && !dock.contains(p)) dock.add(p);
-        for (String p : split(prefs.getString("hidden", ""))) {
+        folders.clear();
+        waitingFolders.clear();
+
+        String dockPref = prefs.getString("dock", null);
+        savedDock = dockPref == null ? new ArrayList<>(Arrays.asList(DEFAULT_DOCK)) : split(dockPref);
+        savedOrder = split(prefs.getString("order", ""));
+        savedHidden = split(prefs.getString("hidden", ""));
+        savedFolders = readFolders();
+
+        for (String p : savedDock) if (installed.containsKey(p) && !dock.contains(p)) dock.add(p);
+        for (String p : savedHidden) {
             if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p)) hidden.add(p);
         }
 
-        // Folders keep only installed apps that aren't docked, off Home or already in another folder
-        loadFolders();
+        // Folders show only installed apps that aren't docked, off Home or already in another folder
         Set<String> inFolder = new HashSet<>();
-        for (Folder f : folders.values()) {
-            List<String> keep = new ArrayList<>();
-            for (String p : f.apps) {
+        for (Folder saved : savedFolders.values()) {
+            Folder f = emptyCopy(saved);
+            for (String p : saved.apps) {
                 if (installed.containsKey(p) && !dock.contains(p) && !hidden.contains(p) && !inFolder.contains(p)) {
-                    keep.add(p);
+                    f.apps.add(p);
                     inFolder.add(p);
                 }
             }
-            f.apps.clear();
-            f.apps.addAll(keep);
+            if (!f.apps.isEmpty()) {
+                folders.put(f.id, f);
+            } else if (hasMissing(saved)) {
+                waitingFolders.add(saved.id);
+            }
         }
 
         // First time with folders: put the rarely used tools into a "More tools" folder
@@ -132,18 +156,17 @@ final class Layout {
             prefs.edit().putBoolean("folders_init", true).apply();
         }
 
-        for (String k : split(prefs.getString("order", ""))) {
+        for (String k : savedOrder) {
             if (grid.contains(k)) continue;
             if (isFolderKey(k)) {
-                Folder f = folderForKey(k);
-                if (f != null && !f.apps.isEmpty()) grid.add(k);
+                if (folderForKey(k) != null) grid.add(k);
             } else if (installed.containsKey(k) && !dock.contains(k) && !hidden.contains(k) && !inFolder.contains(k)) {
                 grid.add(k);
             }
         }
         for (Folder f : folders.values()) {
             String k = keyOf(f);
-            if (!f.apps.isEmpty() && !grid.contains(k)) grid.add(k);
+            if (!grid.contains(k)) grid.add(k);
         }
         // Anything not placed yet (including newly installed apps) goes onto Home in its usual section
         for (String p : installed.keySet()) {
@@ -154,16 +177,57 @@ final class Layout {
 
     void save() {
         dropEmptyFolders();
+        savedDock = withMissing(dock, savedDock);
+        savedOrder = withMissing(grid, savedOrder);
+        savedHidden = withMissing(hidden, savedHidden);
         prefs.edit()
-                .putString("dock", TextUtils.join(",", dock))
-                .putString("order", TextUtils.join(",", grid))
-                .putString("hidden", TextUtils.join(",", hidden))
+                .putString("dock", TextUtils.join(",", savedDock))
+                .putString("order", TextUtils.join(",", savedOrder))
+                .putString("hidden", TextUtils.join(",", savedHidden))
                 .apply();
         saveFolders();
     }
 
-    private void loadFolders() {
-        folders.clear();
+    /**
+     * Takes what's on screen and slots any missing apps (or waiting folders) back into
+     * the places they had in the saved version.
+     */
+    private List<String> withMissing(List<String> shown, List<String> saved) {
+        List<String> out = new ArrayList<>(shown);
+        String prev = null;
+        for (String k : saved) {
+            if (out.contains(k)) {
+                prev = k;
+                continue;
+            }
+            if (!isMissing(k)) continue; // moved or removed on purpose, so don't bring it back
+            int at = prev == null ? 0 : out.indexOf(prev) + 1;
+            out.add(at, k);
+            prev = k;
+        }
+        return out;
+    }
+
+    private boolean isMissing(String k) {
+        if (isFolderKey(k)) return waitingFolders.contains(k.substring(FOLDER_PREFIX.length()));
+        return !installed.containsKey(k);
+    }
+
+    private boolean hasMissing(Folder f) {
+        for (String p : f.apps) if (!installed.containsKey(p)) return true;
+        return false;
+    }
+
+    private static Folder emptyCopy(Folder from) {
+        Folder f = new Folder();
+        f.id = from.id;
+        f.name = from.name;
+        f.group = from.group;
+        return f;
+    }
+
+    private Map<String, Folder> readFolders() {
+        Map<String, Folder> out = new LinkedHashMap<>();
         try {
             JSONArray a = new JSONArray(prefs.getString("folders", "[]"));
             for (int i = 0; i < a.length(); i++) {
@@ -176,16 +240,36 @@ final class Layout {
                 if (f.name.isEmpty()) f.name = "Folder";
                 JSONArray apps = o.optJSONArray("apps");
                 if (apps != null) for (int k = 0; k < apps.length(); k++) f.apps.add(apps.getString(k));
-                if (!f.id.isEmpty()) folders.put(f.id, f);
+                if (!f.id.isEmpty()) out.put(f.id, f);
             }
         } catch (Exception ignored) {
         }
+        return out;
     }
 
     private void saveFolders() {
+        Map<String, Folder> next = new LinkedHashMap<>();
+
+        // Folders on screen, with any missing apps slotted back in
+        for (Folder f : folders.values()) {
+            Folder saved = savedFolders.get(f.id);
+            Folder copy = emptyCopy(f);
+            copy.apps.addAll(saved == null ? f.apps : withMissing(f.apps, saved.apps));
+            next.put(copy.id, copy);
+        }
+        // Folders waiting for their apps to come back (only their missing apps are kept)
+        for (String id : waitingFolders) {
+            if (next.containsKey(id)) continue;
+            Folder saved = savedFolders.get(id);
+            if (saved == null) continue;
+            Folder copy = emptyCopy(saved);
+            for (String p : saved.apps) if (!installed.containsKey(p)) copy.apps.add(p);
+            if (!copy.apps.isEmpty()) next.put(copy.id, copy);
+        }
+
         JSONArray a = new JSONArray();
         try {
-            for (Folder f : folders.values()) {
+            for (Folder f : next.values()) {
                 JSONObject o = new JSONObject();
                 o.put("id", f.id);
                 o.put("name", f.name);
@@ -198,6 +282,7 @@ final class Layout {
         } catch (Exception ignored) {
         }
         prefs.edit().putString("folders", a.toString()).apply();
+        savedFolders = next;
     }
 
     private void dropEmptyFolders() {
@@ -206,6 +291,9 @@ final class Layout {
         for (String id : empty) {
             folders.remove(id);
             grid.remove(FOLDER_PREFIX + id);
+            // Keep it if it still has apps that are only missing for now
+            Folder saved = savedFolders.get(id);
+            if (saved != null && hasMissing(saved)) waitingFolders.add(id);
         }
     }
 
