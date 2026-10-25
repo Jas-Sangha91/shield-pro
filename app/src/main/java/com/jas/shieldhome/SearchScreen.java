@@ -7,8 +7,11 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
@@ -29,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static com.jas.shieldhome.Tmdb.hasToken;
 import static com.jas.shieldhome.Tmdb.parseItem;
@@ -42,12 +46,69 @@ import static com.jas.shieldhome.Ui.POSTER_H;
 import static com.jas.shieldhome.Ui.POSTER_W;
 import static com.jas.shieldhome.Ui.SOFT_TEXT;
 import static com.jas.shieldhome.Ui.WRAP;
+import static com.jas.shieldhome.Ui.str;
 import static com.jas.shieldhome.Ui.timeOfDayColors;
 
-/** The full-screen search for apps, films and series. */
+/** The full-screen search for apps, films, series, people and genres. */
 final class SearchScreen {
 
+    private static final String DOT = " \u00B7 ";
+
+    // Words that open Browse: {search term, genre, subgenre or null}. Hyphens count as spaces.
+    private static final String[][] SHORTCUTS = {
+            {"horror", "Horror", null}, {"scary", "Horror", null}, {"spooky", "Horror", null},
+            {"slasher", "Horror", "Slasher"}, {"slashers", "Horror", "Slasher"},
+            {"supernatural", "Horror", "Supernatural"},
+            {"found footage", "Horror", "Found footage"},
+            {"zombie", "Horror", "Zombie"}, {"zombies", "Horror", "Zombie"},
+            {"ghost", "Horror", "Ghost"}, {"ghosts", "Horror", "Ghost"},
+            {"haunted", "Horror", "Haunted house"}, {"haunted house", "Horror", "Haunted house"},
+            {"vampire", "Horror", "Vampire"}, {"vampires", "Horror", "Vampire"},
+            {"creature", "Horror", "Creature feature"}, {"monster", "Horror", "Creature feature"},
+            {"monsters", "Horror", "Creature feature"},
+            {"body horror", "Horror", "Body horror"},
+            {"psychological", "Horror", "Psychological"},
+            {"comedy", "Comedy", null}, {"comedies", "Comedy", null}, {"funny", "Comedy", null},
+            {"romcom", "Comedy", "Romantic comedy"}, {"rom com", "Comedy", "Romantic comedy"},
+            {"romcoms", "Comedy", "Romantic comedy"}, {"romantic comedy", "Comedy", "Romantic comedy"},
+            {"dark comedy", "Comedy", "Dark comedy"}, {"black comedy", "Comedy", "Dark comedy"},
+            {"spoof", "Comedy", "Spoof"}, {"parody", "Comedy", "Spoof"},
+            {"stand up", "Comedy", "Stand-up"}, {"standup", "Comedy", "Stand-up"},
+            {"action", "Action", null},
+            {"thriller", "Thriller", null}, {"thrillers", "Thriller", null}, {"suspense", "Thriller", null},
+            {"sci fi", "Sci-fi", null}, {"scifi", "Sci-fi", null}, {"science fiction", "Sci-fi", null},
+            {"drama", "Drama", null}, {"dramas", "Drama", null},
+            {"crime", "Crime", null}, {"gangster", "Crime", null},
+            {"mystery", "Mystery", null}, {"whodunnit", "Mystery", null}, {"whodunit", "Mystery", null},
+            {"romance", "Romance", null}, {"romantic", "Romance", null}, {"love story", "Romance", null},
+            {"fantasy", "Fantasy", null},
+            {"animation", "Animation", null}, {"animated", "Animation", null},
+            {"cartoon", "Animation", null}, {"cartoons", "Animation", null}, {"anime", "Animation", null},
+            {"family", "Family", null}, {"kids", "Family", null},
+            {"documentary", "Documentary", null}, {"documentaries", "Documentary", null},
+            {"war", "War", null},
+            {"western", "Western", null}, {"westerns", "Western", null}};
+
+    private static final class Person {
+        final int id;
+        final String name, profile, dept;
+
+        Person(int id, String name, String profile, String dept) {
+            this.id = id;
+            this.name = name;
+            this.profile = profile;
+            this.dept = dept;
+        }
+    }
+
+    private static final class Found {
+        final List<Item> films = new ArrayList<>();
+        final List<Person> people = new ArrayList<>();
+        boolean personFirst = false;
+    }
+
     private final MainActivity a;
+    private BrowsePage browse;
 
     SearchScreen(MainActivity a) {
         this.a = a;
@@ -55,6 +116,11 @@ final class SearchScreen {
 
     private int dp(int v) {
         return a.dp(v);
+    }
+
+    private BrowsePage browse() {
+        if (browse == null) browse = new BrowsePage(a, a.discover);
+        return browse;
     }
 
     void open() {
@@ -79,7 +145,7 @@ final class SearchScreen {
         field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         field.setTextColor(0xFFFFFFFF);
         field.setHintTextColor(0x80FFFFFF);
-        field.setHint("Search your apps, films and series");
+        field.setHint("Search apps, films, series, people or genres");
         field.setInputType(InputType.TYPE_CLASS_TEXT);
         field.setImeOptions(EditorInfo.IME_ACTION_SEARCH
                 | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
@@ -130,13 +196,25 @@ final class SearchScreen {
                 render(results, field, d, q, null, searchFilms);
                 if (!searchFilms) return;
                 pending[0] = () -> new Thread(() -> {
-                    final List<Item> found = new ArrayList<>();
+                    final Found found = new Found();
                     try {
                         JSONArray res = new JSONObject(tmdbGet("/search/multi?language=en-US&include_adult=false&page=1&query="
                                 + URLEncoder.encode(q, "UTF-8"))).getJSONArray("results");
-                        for (int i = 0; i < res.length() && found.size() < 20; i++) {
-                            Item it = parseItem(res.getJSONObject(i), null);
-                            if (it != null) found.add(it);
+                        for (int i = 0; i < res.length(); i++) {
+                            JSONObject r = res.getJSONObject(i);
+                            if ("person".equals(str(r, "media_type"))) {
+                                if (i == 0) found.personFirst = true;
+                                String prof = str(r, "profile_path");
+                                if (prof.isEmpty() || "null".equals(prof) || found.people.size() >= 8) continue;
+                                found.people.add(new Person(r.optInt("id"), str(r, "name"), prof,
+                                        str(r, "known_for_department")));
+                                continue;
+                            }
+                            if (found.films.size() >= 20) continue;
+                            Item it = parseItem(r, null);
+                            if (it == null) continue;
+                            Languages.remember(it, r);
+                            found.films.add(it);
                         }
                     } catch (Exception ignored) {
                     }
@@ -173,20 +251,18 @@ final class SearchScreen {
     }
 
     private void render(final LinearLayout results, final EditText field, final Dialog d,
-                        final String q, final List<Item> films, final boolean searchFilms) {
+                        final String q, final Found found, final boolean searchFilms) {
         results.removeAllViews();
 
         if (q.isEmpty()) {
             List<String> recent = loadRecent();
             if (recent.isEmpty()) {
-                note(results, "Type to search your apps and every film and series.");
+                note(results, "Type to search your apps, films, series and people, or a genre like horror.");
                 return;
             }
             a.addHeaderTo(results, "Recent searches");
-            LinearLayout pills = new LinearLayout(a);
-            pills.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout pills = row();
             pills.setPadding(dp(12), dp(6), dp(12), dp(6));
-            pills.setClipChildren(false);
             for (final String term : recent) {
                 TextView p = a.pillButton(term, () -> {
                     field.setText(term);
@@ -198,6 +274,24 @@ final class SearchScreen {
             }
             results.addView(band(pills), new LinearLayout.LayoutParams(MATCH, WRAP));
             return;
+        }
+
+        // Genre shortcuts (instant)
+        List<int[]> cuts = findShortcuts(q);
+        if (!cuts.isEmpty()) {
+            a.addHeaderTo(results, "Browse");
+            LinearLayout pills = row();
+            pills.setPadding(dp(12), dp(6), dp(12), dp(6));
+            for (final int[] c : cuts) {
+                TextView p = a.pillButton(shortcutLabel(c), () -> {
+                    saveRecent(q);
+                    browse().openWith(c[0], c[1], c[2]);
+                }, null);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
+                lp.rightMargin = dp(10);
+                pills.addView(p, lp);
+            }
+            results.addView(band(pills), new LinearLayout.LayoutParams(MATCH, WRAP));
         }
 
         // Apps
@@ -221,27 +315,160 @@ final class SearchScreen {
             results.addView(band(row), new LinearLayout.LayoutParams(MATCH, WRAP));
         }
 
-        // Films and series
+        // Films, series and people
         if (searchFilms) {
-            if (films == null) {
-                note(results, "Searching films and series\u2026");
-            } else if (films.isEmpty()) {
-                note(results, apps.isEmpty() ? "No results for \"" + q + "\"." : "No films or series found.");
+            if (found == null) {
+                note(results, "Searching films, series and people\u2026");
+            } else if (found.films.isEmpty() && found.people.isEmpty()) {
+                if (apps.isEmpty() && cuts.isEmpty()) note(results, "No results for \"" + q + "\".");
+                else note(results, "No films, series or people found.");
             } else {
-                a.addHeaderTo(results, "Films and series");
-                LinearLayout row = row();
-                for (final Item it : films) {
-                    row.addView(a.discover.buildPoster(it, POSTER_W, POSTER_H, false, () -> {
-                        saveRecent(q);
-                        a.discover.openInfo(it);
-                    }), a.size(POSTER_W, POSTER_H, 8));
-                }
-                results.addView(band(row), new LinearLayout.LayoutParams(MATCH, WRAP));
+                if (found.personFirst) addPeople(results, found.people, q);
+                addFilms(results, found.films, q);
+                if (!found.personFirst) addPeople(results, found.people, q);
             }
-        } else if (apps.isEmpty()) {
+        } else if (apps.isEmpty() && cuts.isEmpty()) {
             note(results, "No apps match \"" + q + "\".");
         }
     }
+
+    private void addFilms(LinearLayout results, List<Item> films, final String q) {
+        if (films.isEmpty()) return;
+        a.addHeaderTo(results, "Films and series");
+        LinearLayout row = row();
+        for (final Item it : films) {
+            View p = a.discover.buildPoster(it, POSTER_W, POSTER_H, false, () -> {
+                saveRecent(q);
+                a.discover.openInfo(it);
+            });
+            Languages.tag(a, p, it);
+            row.addView(p, a.size(POSTER_W, POSTER_H, 8));
+        }
+        results.addView(band(row), new LinearLayout.LayoutParams(MATCH, WRAP));
+    }
+
+    private void addPeople(LinearLayout results, List<Person> people, final String q) {
+        if (people.isEmpty()) return;
+        a.addHeaderTo(results, "People");
+        LinearLayout row = row();
+        for (final Person p : people) {
+            row.addView(personTile(p, q), a.size(POSTER_W, POSTER_H, 8));
+        }
+        results.addView(band(row), new LinearLayout.LayoutParams(MATCH, WRAP));
+    }
+
+    /** A photo tile with the person's name and job along the bottom. */
+    private View personTile(final Person p, final String q) {
+        Item photo = new Item();
+        photo.id = p.id;
+        photo.type = "person";
+        photo.title = p.name;
+        photo.poster = p.profile;
+        photo.backdrop = "";
+        photo.overview = "";
+        photo.date = "";
+        photo.year = "";
+
+        View t = a.discover.buildPoster(photo, POSTER_W, POSTER_H, false, () -> {
+            saveRecent(q);
+            browse().openPerson(p.id, p.name, p.dept);
+        });
+        // No film menu for people
+        t.setOnLongClickListener(v -> true);
+
+        LinearLayout band = new LinearLayout(a);
+        band.setOrientation(LinearLayout.VERTICAL);
+        band.setBackgroundColor(0xB3000000);
+        band.setPadding(dp(6), dp(4), dp(6), dp(5));
+
+        TextView name = new TextView(a);
+        a.style(name, 12, true, 0xFFFFFFFF);
+        name.setText(p.name);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        band.addView(name, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        String job = jobLabel(p.dept);
+        if (!job.isEmpty()) {
+            TextView dept = new TextView(a);
+            a.style(dept, 10, false, SOFT_TEXT);
+            dept.setText(job);
+            dept.setSingleLine(true);
+            band.addView(dept, new LinearLayout.LayoutParams(MATCH, WRAP));
+        }
+
+        if (t instanceof FrameLayout) {
+            ((FrameLayout) t).addView(band, new FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM));
+        }
+        return t;
+    }
+
+    private static String jobLabel(String dept) {
+        if (dept == null || dept.isEmpty()) return "";
+        if (dept.equals("Acting")) return "Actor";
+        if (dept.equals("Directing")) return "Director";
+        if (dept.equals("Writing")) return "Writer";
+        if (dept.equals("Production")) return "Producer";
+        return dept;
+    }
+
+    // ---------- Genre shortcuts ----------
+
+    private static String normalise(String s) {
+        return s.toLowerCase(Locale.UK).replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    /** Each result is {genre index, subgenre index or -1, type: 0 films, 1 series, -1 last used}. */
+    private List<int[]> findShortcuts(String q) {
+        List<int[]> out = new ArrayList<>();
+        String n = normalise(q);
+        if (n.isEmpty()) return out;
+
+        String[] tokens = n.split(" ");
+        int type = -1;
+        for (String t : tokens) {
+            if (t.equals("series") || t.equals("show") || t.equals("shows") || t.equals("tv")) type = 1;
+            else if (t.equals("film") || t.equals("films") || t.equals("movie") || t.equals("movies")) type = 0;
+        }
+        boolean single = tokens.length == 1;
+
+        List<int[]> hits = new ArrayList<>();
+        for (String[] s : SHORTCUTS) {
+            String term = s[0];
+            boolean match = Pattern.compile("(^| )" + Pattern.quote(term) + "( |$)").matcher(n).find()
+                    || (single && n.length() >= 4 && !term.contains(" ") && term.startsWith(n));
+            if (!match) continue;
+            int g = BrowsePage.genreIndex(s[1]);
+            if (g < 0) continue;
+            int sub = s[2] == null ? -1 : BrowsePage.subIndex(g, s[2]);
+            boolean dup = false;
+            for (int[] h : hits) if (h[0] == g && h[1] == sub) dup = true;
+            if (!dup) hits.add(new int[]{g, sub, type});
+        }
+
+        // If a subgenre matched, drop its plain genre (e.g. "body horror" shouldn't also show Horror)
+        for (int[] h : hits) {
+            if (h[1] < 0) {
+                boolean hasSub = false;
+                for (int[] o : hits) if (o[0] == h[0] && o[1] >= 0) hasSub = true;
+                if (hasSub) continue;
+            }
+            out.add(h);
+            if (out.size() >= 3) break;
+        }
+        return out;
+    }
+
+    /** "Horror films · Slasher" */
+    private String shortcutLabel(int[] c) {
+        int type = c[2] >= 0 ? c[2] : BrowsePage.savedType(a);
+        BrowsePage.Genre g = BrowsePage.GENRES[c[0]];
+        String label = g.name + (type == 1 ? " series" : " films");
+        if (c[1] >= 0 && g.subs != null) label += DOT + g.subs[c[1]][0];
+        return label;
+    }
+
+    // ---------- Layout helpers ----------
 
     private LinearLayout row() {
         LinearLayout row = new LinearLayout(a);
@@ -270,6 +497,8 @@ final class SearchScreen {
         lp.leftMargin = dp(12);
         parent.addView(t, lp);
     }
+
+    // ---------- Recent searches ----------
 
     private List<String> loadRecent() {
         List<String> out = new ArrayList<>();
