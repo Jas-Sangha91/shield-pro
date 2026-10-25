@@ -17,6 +17,7 @@ import android.widget.TextView;
 import com.jas.shieldhome.Tmdb.Item;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,13 +35,9 @@ import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
 
 /**
- * Artwork behind the screen, Netflix style: sharp artwork across the top, fading into dark
- * before the lower rows, darker on the left, along the top and behind the clock.
- *
- * Home: trending artwork rotates every 30 seconds, with a caption under the weather
- *       (press Play to open its info card). Switched on and off in the cog menu.
- * Discover: the artwork follows whichever poster is highlighted. Always on.
- * Apps: plain background.
+ * Artwork behind the screen, Netflix style.
+ * Home: artwork rotates every 30 seconds (your languages plus big international hits), with a caption.
+ * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
  */
 final class Wallpaper {
 
@@ -48,20 +45,23 @@ final class Wallpaper {
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
     private static final long FADE_MS = 1500L;
     private static final long FOLLOW_FADE_MS = 700L;
-    // Wait this long after a poster is highlighted before changing, so fast scrolling doesn't flicker
     private static final long FOLLOW_DELAY_MS = 350L;
 
-    // The dark colour the artwork fades into
     private static final int BG = 0xFF0A0D14;
-
-    // How much of the screen height the artwork covers (0.72 = 72%)
     private static final float ART_HEIGHT = 0.72f;
 
-    // Caption colours: title brightest, details softer, hint dimmest (no pure white, which is harsh on TVs)
     private static final int CAP_TITLE = 0xF2F1F1F1;
     private static final int CAP_DETAILS = 0xBFF1F1F1;
     private static final int CAP_HINT = 0x80F1F1F1;
     private static final String GAP = "  \u00B7  ";
+
+    // Where Home artwork comes from: {request, type}
+    private static final String[][] SOURCES = {
+            {"/trending/all/week?language=en-US&page=1", null},
+            {"/trending/all/week?language=en-US&page=2", null},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=20", "movie"},
+            {"/discover/tv?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=10", "tv"},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa&vote_count.gte=3", "movie"}};
 
     private final MainActivity a;
     private final FrameLayout root;
@@ -127,24 +127,20 @@ final class Wallpaper {
             layers[i] = iv;
         }
 
-        // A light dim over the whole picture, so tiles and posters stand out
         View dim = new View(a);
         dim.setBackgroundColor(0x330A0D14);
         art.addView(dim, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Darker on the left, where the tabs, weather, caption and titles are
         View left = new View(a);
         left.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{0xF20A0D14, 0xA60A0D14, 0x1A0A0D14, 0x000A0D14}));
         art.addView(left, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Darker along the top, behind the tabs and clock (strong enough for bright pictures)
         View top = new View(a);
         top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xD90A0D14, 0x660A0D14, 0x000A0D14}));
         art.addView(top, new FrameLayout.LayoutParams(MATCH, Math.round(artHeight * 0.45f), Gravity.TOP));
 
-        // A soft dark patch behind the clock, top right, fading out with no edge
         View clockShade = new View(a);
         GradientDrawable patch = new GradientDrawable();
         patch.setGradientType(GradientDrawable.RADIAL_GRADIENT);
@@ -154,13 +150,11 @@ final class Wallpaper {
         clockShade.setBackground(patch);
         art.addView(clockShade, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Fades the bottom of the picture smoothly into the dark background
         View bottom = new View(a);
         bottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // One-line caption on the left, directly under the weather (Home only)
         caption = new TextView(a);
         a.style(caption, 13, false, CAP_DETAILS);
         caption.setSingleLine(true);
@@ -177,7 +171,6 @@ final class Wallpaper {
         return root;
     }
 
-    /** The Home wallpaper switch in the cog menu (Discover's background is always on). */
     boolean isOn() {
         return a.prefs.getBoolean("wallpaper_on", true);
     }
@@ -198,21 +191,17 @@ final class Wallpaper {
         a.handler.removeCallbacks(followRun);
     }
 
-    /** Called whenever the page changes; works out what to show from the current page. */
     void setShownOnPage(boolean ignored) {
         if (a.page == lastPage) return;
         lastPage = a.page;
         if (a.page == MainActivity.PAGE_DISCOVER) {
-            // Start Discover clean; the background appears once a poster is highlighted
             pendingFollow = null;
             followKey = null;
         }
         update();
-        // Coming back to Home: show a fresh Home picture straight away
         if (rotating() && !items.isEmpty()) next();
     }
 
-    /** Discover: a poster was highlighted, so follow it (after a short pause). */
     void follow(Item it) {
         if (it == null || it.backdrop == null || it.backdrop.isEmpty()) return;
         pendingFollow = it;
@@ -220,12 +209,10 @@ final class Wallpaper {
         a.handler.postDelayed(followRun, FOLLOW_DELAY_MS);
     }
 
-    /** True while a picture is actually on screen (used to soften the colour glow). */
     boolean isShowingPicture() {
         return (rotating() && hasImage) || (following() && followKey != null);
     }
 
-    /** Home: the film or series currently on the wallpaper, or null. */
     Item currentItem() {
         return rotating() && hasImage ? shown : null;
     }
@@ -265,17 +252,19 @@ final class Wallpaper {
         new Thread(() -> {
             final List<Item> found = new ArrayList<>();
             Set<String> seen = new HashSet<>();
-            try {
-                for (int pageNo = 1; pageNo <= 2; pageNo++) {
-                    JSONArray res = new org.json.JSONObject(
-                            tmdbGet("/trending/all/week?language=en-US&page=" + pageNo)).getJSONArray("results");
+            for (String[] s : SOURCES) {
+                try {
+                    JSONArray res = new JSONObject(tmdbGet(s[0])).getJSONArray("results");
                     for (int i = 0; i < res.length(); i++) {
-                        Item it = parseItem(res.getJSONObject(i), null);
+                        JSONObject raw = res.getJSONObject(i);
+                        if (!Languages.keep(raw)) continue;
+                        Item it = parseItem(raw, s[1]);
                         if (it == null || it.backdrop.isEmpty() || !seen.add(it.key())) continue;
+                        Languages.remember(it, raw);
                         found.add(it);
                     }
+                } catch (Exception ignored) {
                 }
-            } catch (Exception ignored) {
             }
             Collections.shuffle(found);
             a.runOnUiThread(() -> {
@@ -290,7 +279,6 @@ final class Wallpaper {
         }).start();
     }
 
-    /** Home: the next trending picture. */
     private void next() {
         if (items.isEmpty()) return;
         index = (index + 1) % items.size();
@@ -319,7 +307,7 @@ final class Wallpaper {
         front = 1 - front;
     }
 
-    /** "Title · ★ 8.6 · 2025 · Series · Play for info", with the title bold and the hint dimmest. */
+    /** "Title · ★ 8.6 · 2025 · Series · Korean · Play for info". */
     private CharSequence captionFor(Item it) {
         SpannableStringBuilder sb = new SpannableStringBuilder();
         int start = sb.length();
@@ -328,6 +316,8 @@ final class Wallpaper {
         sb.setSpan(new ForegroundColorSpan(CAP_TITLE), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
         sb.append(GAP).append(meta(it).replace(SEP, GAP));
+        String lang = Languages.foreignName(it);
+        if (lang != null) sb.append(GAP).append(lang);
 
         start = sb.length();
         sb.append(GAP).append("Play for info");
