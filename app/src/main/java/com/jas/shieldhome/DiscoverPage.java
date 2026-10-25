@@ -51,7 +51,7 @@ import static com.jas.shieldhome.Ui.WRAP;
 import static com.jas.shieldhome.Ui.dominantColor;
 import static com.jas.shieldhome.Ui.str;
 
-/** The Discover page: Tonight's pick, My list, the rows of films and series, and the info card. */
+/** The Discover page: Tonight's pick, Browse by genre, My list, the rows, and the info card. */
 final class DiscoverPage {
 
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
@@ -61,6 +61,7 @@ final class DiscoverPage {
     private static final String YOUTUBE_APP = "com.google.android.youtube.tv";
 
     private final MainActivity a;
+    private final BrowsePage browse;
 
     // Data
     private List<Row> rows = null;
@@ -93,6 +94,7 @@ final class DiscoverPage {
 
     DiscoverPage(MainActivity a) {
         this.a = a;
+        this.browse = new BrowsePage(a, this);
     }
 
     private int dp(int v) {
@@ -149,6 +151,8 @@ final class DiscoverPage {
 
         if (!spotItems.isEmpty()) buildSpotlight();
 
+        buildGenreRow();
+
         myListSection = new LinearLayout(a);
         myListSection.setOrientation(LinearLayout.VERTICAL);
         myListSection.setClipChildren(false);
@@ -190,6 +194,33 @@ final class DiscoverPage {
         }
     }
 
+    // ---------- Browse by genre ----------
+
+    private void buildGenreRow() {
+        a.addHeader("Browse by genre");
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(12), dp(4), dp(12), dp(4));
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
+        for (int i = 0; i < BrowsePage.GENRES.length; i++) {
+            final int gi = i;
+            TextView p = a.pillButton(BrowsePage.GENRES[i].name, () -> browse.open(gi), null);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
+            lp.rightMargin = dp(10);
+            row.addView(p, lp);
+        }
+        TextView all = a.pillButton("All filters\u2026", () -> browse.open(BrowsePage.KEEP), null);
+        row.addView(all, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        HorizontalScrollView hs = new HorizontalScrollView(a);
+        hs.setHorizontalScrollBarEnabled(false);
+        hs.setClipChildren(false);
+        hs.setClipToPadding(false);
+        hs.addView(row, new FrameLayout.LayoutParams(WRAP, WRAP));
+        a.content.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
+    }
+
     // ---------- Loading ----------
 
     private void load() {
@@ -203,22 +234,32 @@ final class DiscoverPage {
             try {
                 Set<String> seen = new HashSet<>();
 
-                JSONArray trending = new JSONObject(tmdbGet("/trending/all/week?language=en-US"))
-                        .getJSONArray("results");
                 Row trendRow = new Row();
                 trendRow.title = "Trending this week";
-                for (int i = 0; i < trending.length(); i++) {
-                    Item it = parseItem(trending.getJSONObject(i), null);
-                    if (it == null || seen.contains(it.key())) continue;
-                    if (picks.size() < SPOT_COUNT && !it.backdrop.isEmpty() && !it.overview.isEmpty()) {
-                        picks.add(it);
-                        seen.add(it.key());
-                    } else if (trendRow.items.size() < ROW_MAX) {
-                        trendRow.items.add(it);
-                        seen.add(it.key());
+                for (int pageNo = 1; pageNo <= 2; pageNo++) {
+                    JSONArray trending = new JSONObject(tmdbGet("/trending/all/week?language=en-US&page=" + pageNo))
+                            .getJSONArray("results");
+                    for (int i = 0; i < trending.length(); i++) {
+                        JSONObject raw = trending.getJSONObject(i);
+                        if (!Languages.keep(raw)) continue;
+                        Item it = parseItem(raw, null);
+                        if (it == null || seen.contains(it.key())) continue;
+                        Languages.remember(it, raw);
+                        if (picks.size() < SPOT_COUNT && !it.backdrop.isEmpty() && !it.overview.isEmpty()) {
+                            picks.add(it);
+                            seen.add(it.key());
+                        } else if (trendRow.items.size() < ROW_MAX) {
+                            trendRow.items.add(it);
+                            seen.add(it.key());
+                        }
                     }
                 }
                 found.add(trendRow);
+
+                try {
+                    found.add(hindiPunjabiRow(seen));
+                } catch (Exception ignored) {
+                }
 
                 found.add(fetchRow("New and highly rated",
                         "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=300"
@@ -258,18 +299,58 @@ final class DiscoverPage {
         }).start();
     }
 
+    /** Fetches up to two pages, keeping only titles in your languages or big international hits. */
     private Row fetchRow(String title, String path, String type, Set<String> seen, String minDate) throws Exception {
-        JSONArray res = new JSONObject(tmdbGet(path)).getJSONArray("results");
         Row row = new Row();
         row.title = title;
-        for (int i = 0; i < res.length() && row.items.size() < ROW_MAX; i++) {
-            Item it = parseItem(res.getJSONObject(i), type);
-            if (it == null || seen.contains(it.key())) continue;
-            if (minDate != null && (it.date.isEmpty() || it.date.compareTo(minDate) < 0)) continue;
-            row.items.add(it);
-            seen.add(it.key());
+        for (int pageNo = 1; pageNo <= 2 && row.items.size() < ROW_MAX; pageNo++) {
+            JSONArray res = new JSONObject(tmdbGet(path + "&page=" + pageNo)).getJSONArray("results");
+            for (int i = 0; i < res.length() && row.items.size() < ROW_MAX; i++) {
+                JSONObject raw = res.getJSONObject(i);
+                if (!Languages.keep(raw)) continue;
+                Item it = parseItem(raw, type);
+                if (it == null || seen.contains(it.key())) continue;
+                if (minDate != null && (it.date.isEmpty() || it.date.compareTo(minDate) < 0)) continue;
+                Languages.remember(it, raw);
+                row.items.add(it);
+                seen.add(it.key());
+            }
         }
         return row;
+    }
+
+    /** Popular Hindi and Punjabi films, mixed two Hindi to one Punjabi. */
+    private Row hindiPunjabiRow(Set<String> seen) throws Exception {
+        String today = dateOffset(0);
+        List<Item> hi = fetchList("/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi"
+                + "&vote_count.gte=20&primary_release_date.lte=" + today, "movie", seen);
+        List<Item> pa = fetchList("/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa"
+                + "&vote_count.gte=3&primary_release_date.lte=" + today, "movie", seen);
+        Row row = new Row();
+        row.title = "Hindi and Punjabi";
+        int h = 0, p = 0;
+        while (row.items.size() < ROW_MAX && (h < hi.size() || p < pa.size())) {
+            for (int k = 0; k < 2 && h < hi.size() && row.items.size() < ROW_MAX; k++) addUnseen(row, hi.get(h++), seen);
+            if (p < pa.size() && row.items.size() < ROW_MAX) addUnseen(row, pa.get(p++), seen);
+        }
+        return row;
+    }
+
+    private void addUnseen(Row row, Item it, Set<String> seen) {
+        if (seen.add(it.key())) row.items.add(it);
+    }
+
+    private List<Item> fetchList(String path, String type, Set<String> seen) throws Exception {
+        List<Item> out = new ArrayList<>();
+        JSONArray res = new JSONObject(tmdbGet(path)).getJSONArray("results");
+        for (int i = 0; i < res.length(); i++) {
+            JSONObject raw = res.getJSONObject(i);
+            Item it = parseItem(raw, type);
+            if (it == null || it.poster.isEmpty() || seen.contains(it.key())) continue;
+            Languages.remember(it, raw);
+            out.add(it);
+        }
+        return out;
     }
 
     // ---------- Tonight's pick ----------
@@ -299,7 +380,6 @@ final class DiscoverPage {
                 new int[]{0x000E1118, SPOT_BG}));
         box.addView(shadeBottom, new FrameLayout.LayoutParams(MATCH, dp(70), Gravity.BOTTOM));
 
-        // Text column: fixed width so the description stays on the left, clear of the picture
         LinearLayout text = new LinearLayout(a);
         text.setOrientation(LinearLayout.VERTICAL);
         text.setPadding(dp(26), dp(20), dp(26), dp(20));
@@ -393,7 +473,8 @@ final class DiscoverPage {
         spotIndex = ((i % n) + n) % n;
         final Item it = spotItems.get(spotIndex);
         spotTitle.setText(it.title);
-        spotMeta.setText(meta(it));
+        String lang = Languages.foreignName(it);
+        spotMeta.setText(meta(it) + (lang == null ? "" : SEP + lang));
         spotDesc.setText(it.overview);
         updateSpotListButton();
 
@@ -447,8 +528,12 @@ final class DiscoverPage {
                 if (res.length() == 0) res = new JSONObject(tmdbGet(base + 1)).getJSONArray("results");
                 List<Item> options = new ArrayList<>();
                 for (int i = 0; i < res.length(); i++) {
-                    Item it = parseItem(res.getJSONObject(i), type);
-                    if (it != null) options.add(it);
+                    JSONObject raw = res.getJSONObject(i);
+                    if (!Languages.keep(raw)) continue;
+                    Item it = parseItem(raw, type);
+                    if (it == null) continue;
+                    Languages.remember(it, raw);
+                    options.add(it);
                 }
                 if (!options.isEmpty()) pick = options.get(r.nextInt(options.size()));
             } catch (Exception ignored) {
@@ -553,6 +638,7 @@ final class DiscoverPage {
         row.setClipToPadding(false);
         for (final Item it : items) {
             View p = a.register(buildPoster(it, POSTER_W, POSTER_H, true, () -> openInfo(it)));
+            Languages.tag(a, p, it);
             if (track != null) track.add(p);
             row.addView(p, a.size(POSTER_W, POSTER_H, 8));
         }
@@ -671,7 +757,6 @@ final class DiscoverPage {
         plp.rightMargin = dp(24);
         top.addView(poster, plp);
 
-        // Text area beside the poster: grows with the text so the buttons never overlap what's below
         LinearLayout info = new LinearLayout(a);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setClipChildren(false);
@@ -687,7 +772,8 @@ final class DiscoverPage {
 
         final TextView metaLine = new TextView(a);
         style(metaLine, 15, false, SOFT_TEXT);
-        metaLine.setText(meta(it));
+        String knownLang = Languages.foreignName(it);
+        metaLine.setText(meta(it) + (knownLang == null ? "" : SEP + knownLang));
         metaLine.setPadding(0, dp(4), 0, 0);
         info.addView(metaLine, new LinearLayout.LayoutParams(MATCH, WRAP));
 
@@ -740,7 +826,6 @@ final class DiscoverPage {
         buttons.addView(closeBtn, new LinearLayout.LayoutParams(WRAP, WRAP));
         info.addView(buttons, new LinearLayout.LayoutParams(WRAP, WRAP));
 
-        // Where to watch (UK streaming services)
         final WhereToWatch watch = new WhereToWatch(a, dialog);
         outer.addView(watch.view(), new LinearLayout.LayoutParams(MATCH, WRAP));
 
@@ -801,6 +886,7 @@ final class DiscoverPage {
                 String key = pickTrailer(videos != null ? videos.optJSONArray("results") : null);
 
                 String age = ageRating(d, it.type);
+                String lang = Languages.foreignNameFor(str(d, "original_language"));
 
                 final List<Item> recs = new ArrayList<>();
                 JSONObject rec = d.optJSONObject("recommendations");
@@ -808,9 +894,12 @@ final class DiscoverPage {
                 if (ra != null) {
                     for (int i = 0; i < ra.length() && recs.size() < 10; i++) {
                         JSONObject rj = ra.getJSONObject(i);
+                        if (!Languages.keep(rj)) continue;
                         String rt = str(rj, "media_type");
                         Item ri = parseItem(rj, rt.isEmpty() ? it.type : rt);
-                        if (ri != null) recs.add(ri);
+                        if (ri == null) continue;
+                        Languages.remember(ri, rj);
+                        recs.add(ri);
                     }
                 }
 
@@ -820,7 +909,7 @@ final class DiscoverPage {
                 final String overviewText = ov.isEmpty()
                         ? (it.overview.isEmpty() ? "No description available." : it.overview) : ov;
                 final String castText = names.isEmpty() ? "" : "Starring " + TextUtils.join(", ", names);
-                final String metaText = meta(it) + (age.isEmpty() ? "" : SEP + age);
+                final String metaText = meta(it) + (age.isEmpty() ? "" : SEP + age) + (lang == null ? "" : SEP + lang);
                 final String foundKey = key;
                 if (key != null) trailerCache.put(it.key(), key);
 
