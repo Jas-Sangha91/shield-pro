@@ -8,6 +8,7 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -54,11 +55,16 @@ import static com.jas.shieldhome.Ui.str;
 /** The Discover page: Tonight's pick, Browse by genre, My list, the rows, and the info card. */
 final class DiscoverPage {
 
+    private static final String TAG = "SanghaHome";
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
     private static final long SPOT_EVERY_MS = 8000L;
     private static final int ROW_MAX = 12;
     private static final int SPOT_COUNT = 5;
     private static final String YOUTUBE_APP = "com.google.android.youtube.tv";
+
+    private interface RowMaker {
+        Row make() throws Exception;
+    }
 
     private final MainActivity a;
     private final BrowsePage browse;
@@ -70,6 +76,7 @@ final class DiscoverPage {
     private long triedAt = 0;
     private boolean loading = false;
     private boolean error = false;
+    private String lastError = "";
     private final Map<String, String> trailerCache = new HashMap<>();
 
     // Tonight's pick
@@ -142,7 +149,9 @@ final class DiscoverPage {
 
         if (rows == null) {
             if (error && !loading) {
-                message("Couldn't load Discover", "Check the internet connection, then open Discover again in a moment.");
+                message("Couldn't load Discover",
+                        "Check the internet connection, then open Discover again in a moment."
+                                + (lastError.isEmpty() ? "" : "\n\nDetails: " + lastError));
             } else {
                 message("Finding something good to watch\u2026", "");
             }
@@ -230,13 +239,14 @@ final class DiscoverPage {
         new Thread(() -> {
             final List<Item> picks = new ArrayList<>();
             final List<Row> found = new ArrayList<>();
-            boolean ok = true;
-            try {
-                Set<String> seen = new HashSet<>();
+            final Set<String> seen = new HashSet<>();
+            final List<String> errors = new ArrayList<>();
 
-                Row trendRow = new Row();
-                trendRow.title = "Trending this week";
-                for (int pageNo = 1; pageNo <= 2; pageNo++) {
+            // Trending (and Tonight's pick), one page at a time so one bad page doesn't stop the rest
+            Row trendRow = new Row();
+            trendRow.title = "Trending this week";
+            for (int pageNo = 1; pageNo <= 2; pageNo++) {
+                try {
                     JSONArray trending = new JSONObject(tmdbGet("/trending/all/week?language=en-US&page=" + pageNo))
                             .getJSONArray("results");
                     for (int i = 0; i < trending.length(); i++) {
@@ -253,34 +263,39 @@ final class DiscoverPage {
                             seen.add(it.key());
                         }
                     }
+                } catch (Exception e) {
+                    Log.w(TAG, "Discover: trending page " + pageNo + " failed", e);
+                    errors.add(describe(e));
                 }
-                found.add(trendRow);
-
-                try {
-                    found.add(hindiPunjabiRow(seen));
-                } catch (Exception ignored) {
-                }
-
-                found.add(fetchRow("New and highly rated",
-                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=300"
-                                + "&primary_release_date.gte=" + dateOffset(-15) + "&primary_release_date.lte=" + dateOffset(0),
-                        "movie", seen, null));
-
-                found.add(fetchRow("Binge-worthy series",
-                        "/discover/tv?language=en-US&sort_by=popularity.desc&vote_average.gte=8&vote_count.gte=500",
-                        "tv", seen, null));
-
-                String[] mood = moodForToday();
-                found.add(fetchRow("Tonight's mood: " + mood[1],
-                        "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=500"
-                                + "&with_genres=" + mood[0],
-                        "movie", seen, null));
-
-                found.add(fetchRow("Coming soon", "/movie/upcoming?language=en-US", "movie", seen, dateOffset(0)));
-            } catch (Exception e) {
-                ok = false;
             }
-            final boolean success = ok;
+            found.add(trendRow);
+
+            tryRow(found, errors, () -> hindiPunjabiRow(seen));
+
+            tryRow(found, errors, () -> fetchRow("New and highly rated",
+                    "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=300"
+                            + "&primary_release_date.gte=" + dateOffset(-15) + "&primary_release_date.lte=" + dateOffset(0),
+                    "movie", seen, null));
+
+            tryRow(found, errors, () -> fetchRow("Binge-worthy series",
+                    "/discover/tv?language=en-US&sort_by=popularity.desc&vote_average.gte=8&vote_count.gte=500",
+                    "tv", seen, null));
+
+            final String[] mood = moodForToday();
+            tryRow(found, errors, () -> fetchRow("Tonight's mood: " + mood[1],
+                    "/discover/movie?language=en-US&sort_by=popularity.desc&vote_average.gte=7&vote_count.gte=500"
+                            + "&with_genres=" + mood[0],
+                    "movie", seen, null));
+
+            tryRow(found, errors, () -> fetchRow("Coming soon", "/movie/upcoming?language=en-US",
+                    "movie", seen, dateOffset(0)));
+
+            // Only call it a failure if nothing at all loaded
+            boolean anything = !picks.isEmpty();
+            for (Row r : found) if (!r.items.isEmpty()) anything = true;
+            final boolean success = anything;
+            final String firstError = errors.isEmpty() ? "" : errors.get(0);
+
             if (success) {
                 for (Item it : picks) a.images.prefetch(TMDB_IMG + "w780" + it.backdrop);
             }
@@ -291,20 +306,43 @@ final class DiscoverPage {
                     rows = found;
                     loadedAt = System.currentTimeMillis();
                     spotIndex = 0;
+                    lastError = "";
                 } else {
                     error = true;
+                    lastError = firstError;
                 }
                 if (a.page == MainActivity.PAGE_DISCOVER) a.render(null, false);
             });
         }).start();
     }
 
-    /** Fetches up to two pages, keeping only titles in your languages or big international hits. */
+    /** Loads one row; if it fails, logs why and carries on with the others. */
+    private void tryRow(List<Row> found, List<String> errors, RowMaker maker) {
+        try {
+            Row r = maker.make();
+            if (r != null) found.add(r);
+        } catch (Exception e) {
+            Log.w(TAG, "Discover: a row failed", e);
+            errors.add(describe(e));
+        }
+    }
+
+    private static String describe(Exception e) {
+        String msg = e.getMessage();
+        String s = e.getClass().getSimpleName() + (msg == null || msg.isEmpty() ? "" : ": " + msg);
+        return s.length() > 160 ? s.substring(0, 160) + "\u2026" : s;
+    }
+
+    /** Fetches up to two pages (only if a second exists), keeping your languages or big hits. */
     private Row fetchRow(String title, String path, String type, Set<String> seen, String minDate) throws Exception {
         Row row = new Row();
         row.title = title;
-        for (int pageNo = 1; pageNo <= 2 && row.items.size() < ROW_MAX; pageNo++) {
-            JSONArray res = new JSONObject(tmdbGet(path + "&page=" + pageNo)).getJSONArray("results");
+        int totalPages = 1;
+        for (int pageNo = 1; pageNo <= 2 && pageNo <= totalPages && row.items.size() < ROW_MAX; pageNo++) {
+            JSONObject o = new JSONObject(tmdbGet(path + "&page=" + pageNo));
+            totalPages = o.optInt("total_pages", 1);
+            JSONArray res = o.optJSONArray("results");
+            if (res == null) break;
             for (int i = 0; i < res.length() && row.items.size() < ROW_MAX; i++) {
                 JSONObject raw = res.getJSONObject(i);
                 if (!Languages.keep(raw)) continue;
@@ -324,8 +362,13 @@ final class DiscoverPage {
         String today = dateOffset(0);
         List<Item> hi = fetchList("/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi"
                 + "&vote_count.gte=20&primary_release_date.lte=" + today, "movie", seen);
-        List<Item> pa = fetchList("/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa"
-                + "&vote_count.gte=3&primary_release_date.lte=" + today, "movie", seen);
+        List<Item> pa = new ArrayList<>();
+        try {
+            pa = fetchList("/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa"
+                    + "&vote_count.gte=3&primary_release_date.lte=" + today, "movie", seen);
+        } catch (Exception e) {
+            Log.w(TAG, "Discover: Punjabi films failed", e);
+        }
         Row row = new Row();
         row.title = "Hindi and Punjabi";
         int h = 0, p = 0;
@@ -536,7 +579,8 @@ final class DiscoverPage {
                     options.add(it);
                 }
                 if (!options.isEmpty()) pick = options.get(r.nextInt(options.size()));
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                Log.w(TAG, "Surprise me failed", e);
             }
             final Item chosen = pick;
             a.runOnUiThread(() -> {
@@ -933,6 +977,7 @@ final class DiscoverPage {
                     }
                 });
             } catch (Exception e) {
+                Log.w(TAG, "Info card failed", e);
                 a.runOnUiThread(() -> {
                     overview.setText(it.overview.isEmpty()
                             ? "Couldn't load details. Check the internet connection." : it.overview);
