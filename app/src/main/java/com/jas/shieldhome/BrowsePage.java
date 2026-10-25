@@ -43,11 +43,11 @@ import static com.jas.shieldhome.Ui.str;
 /**
  * Browse: every film and series on TMDB (worldwide, any service), filtered by genre, subgenre,
  * sort, decade and length. Also shows a person's films and series (opened from Search).
- * Follows the language rules in Languages. Remembers the last filters.
+ * Follows the language rules in Languages. Always opens on Popular; remembers Films or Series.
  */
 final class BrowsePage {
 
-    /** Pass to open() to keep the last genre. */
+    /** Pass to open() for any genre (used by "All filters"). */
     static final int KEEP = -2;
 
     private static final int COLS = 7;
@@ -125,7 +125,7 @@ final class BrowsePage {
     private final MainActivity a;
     private final DiscoverPage discover;
 
-    // Filters (remembered)
+    // Filters
     private int type, genre, sub, sort, decade, length;
 
     // Person mode (opened from Search)
@@ -201,26 +201,30 @@ final class BrowsePage {
 
     // ---------- Opening ----------
 
-    /** Opens Browse on a genre (index into GENRES), -1 for any genre, or KEEP for the last one. */
+    /** Opens Browse on a genre (index into GENRES), or -1 / KEEP for any genre. Always starts on Popular. */
     void open(int genreIndex) {
         personId = 0;
         loadFilters();
-        if (genreIndex != KEEP && genreIndex != genre) {
-            genre = genreIndex;
-            sub = -1;
-            saveFilters();
-        }
+        genre = (genreIndex >= 0 && genreIndex < GENRES.length) ? genreIndex : -1;
+        sub = -1;
+        sort = 0;
+        decade = 0;
+        length = 0;
+        saveFilters();
         start();
     }
 
-    /** Opens Browse with a genre, subgenre (-1 = any) and type (0 films, 1 series, -1 = last used). */
+    /** Opens Browse with a genre, subgenre (-1 = any) and type (0 films, 1 series, -1 = last used). Starts on Popular. */
     void openWith(int genreIndex, int subIndex, int typeIndex) {
         personId = 0;
         loadFilters();
         if (typeIndex == 0 || typeIndex == 1) type = typeIndex;
-        if (genreIndex >= -1 && genreIndex < GENRES.length) genre = genreIndex;
+        genre = (genreIndex >= 0 && genreIndex < GENRES.length) ? genreIndex : -1;
         boolean subOk = genre >= 0 && GENRES[genre].subs != null && subIndex >= 0 && subIndex < GENRES[genre].subs.length;
         sub = subOk ? subIndex : -1;
+        sort = 0;
+        decade = 0;
+        length = 0;
         saveFilters();
         start();
     }
@@ -246,8 +250,8 @@ final class BrowsePage {
 
     private void loadFilters() {
         type = clamp(a.prefs.getInt("browse_type", 0), TYPES.length);
-        genre = a.prefs.getInt("browse_genre", 0);
-        if (genre < -1 || genre >= GENRES.length) genre = 0;
+        genre = a.prefs.getInt("browse_genre", -1);
+        if (genre < -1 || genre >= GENRES.length) genre = -1;
         sub = a.prefs.getInt("browse_sub", -1);
         if (genre < 0 || GENRES[genre].subs == null || sub >= GENRES[genre].subs.length) sub = -1;
         sort = clamp(a.prefs.getInt("browse_sort", 0), SORTS.length);
