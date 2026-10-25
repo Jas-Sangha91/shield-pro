@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.Consumer;
 
 import static com.jas.shieldhome.Tmdb.TMDB_IMG;
 import static com.jas.shieldhome.Tmdb.hasToken;
@@ -42,19 +41,33 @@ import static com.jas.shieldhome.Tmdb.meta;
 import static com.jas.shieldhome.Tmdb.parseItem;
 import static com.jas.shieldhome.Tmdb.tmdbGet;
 import static com.jas.shieldhome.Ui.MATCH;
+import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.SOFT_TEXT;
 import static com.jas.shieldhome.Ui.WRAP;
 import static com.jas.shieldhome.Ui.str;
 
 /**
- * Screensaver: film and series artwork, slowly drifting and fading, with the title and clock.
- * Shows the official title logo when TMDB has one, otherwise the title as text.
- * Left and right on the remote skip pictures; any other button exits; volume still works.
+ * Screensaver: artwork (your languages plus big international hits), slowly drifting and fading,
+ * with the official title logo when TMDB has one. Left and right skip; any other button exits.
  */
 public class ArtworkDream extends DreamService {
 
     private static final long EVERY_MS = 20 * 1000L;
     private static final long FADE_MS = 2000L;
+
+    // Where screensaver artwork comes from: {request, type}
+    private static final String[][] SOURCES = {
+            {"/trending/all/week?language=en-US&page=1", null},
+            {"/trending/all/week?language=en-US&page=2", null},
+            {"/movie/top_rated?language=en-US&page=1", "movie"},
+            {"/tv/top_rated?language=en-US&page=1", "tv"},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=20", "movie"},
+            {"/discover/tv?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=10", "tv"},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa&vote_count.gte=3", "movie"}};
+
+    private interface Done {
+        void got(String value);
+    }
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Images images = new Images();
@@ -86,7 +99,6 @@ public class ArtworkDream extends DreamService {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
-        // Interactive so left and right can skip; other buttons exit (handled below)
         setInteractive(true);
         setFullscreen(true);
         setContentView(buildScreen());
@@ -129,13 +141,11 @@ public class ArtworkDream extends DreamService {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
 
-        // Let the volume buttons work as normal
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN
                 || code == KeyEvent.KEYCODE_VOLUME_MUTE) {
             return false;
         }
 
-        // Left and right skip pictures
         if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
             if (e.getAction() == KeyEvent.ACTION_DOWN && !items.isEmpty()) {
                 if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
@@ -147,7 +157,6 @@ public class ArtworkDream extends DreamService {
             return true;
         }
 
-        // Anything else ends the screensaver
         if (e.getAction() == KeyEvent.ACTION_DOWN) exit();
         return true;
     }
@@ -171,13 +180,11 @@ public class ArtworkDream extends DreamService {
             layers[i] = iv;
         }
 
-        // Darker at the top and bottom so the clock and title are easy to read
         View scrim = new View(this);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x80000000, 0x00000000, 0x00000000, 0xB3000000}));
         root.addView(scrim, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Title (logo or text) and details, bottom left
         caption = new LinearLayout(this);
         caption.setOrientation(LinearLayout.VERTICAL);
         caption.setAlpha(0f);
@@ -204,7 +211,6 @@ public class ArtworkDream extends DreamService {
         cap.setMargins(dp(64), 0, dp(64), dp(56));
         root.addView(caption, cap);
 
-        // Clock, top right (uses Sangha Home's clock time zone if one is set; no city name shown)
         SharedPreferences prefs = getSharedPreferences("home", MODE_PRIVATE);
         String tz = prefs.getString("clock_tz", null);
         clockBox = new LinearLayout(this);
@@ -241,17 +247,15 @@ public class ArtworkDream extends DreamService {
         new Thread(() -> {
             final List<Item> found = new ArrayList<>();
             Set<String> seen = new HashSet<>();
-            String[][] sources = {
-                    {"/trending/all/week?language=en-US&page=1", null},
-                    {"/trending/all/week?language=en-US&page=2", null},
-                    {"/movie/top_rated?language=en-US&page=1", "movie"},
-                    {"/tv/top_rated?language=en-US&page=1", "tv"}};
-            for (String[] s : sources) {
+            for (String[] s : SOURCES) {
                 try {
                     JSONArray res = new JSONObject(tmdbGet(s[0])).getJSONArray("results");
                     for (int i = 0; i < res.length(); i++) {
-                        Item it = parseItem(res.getJSONObject(i), s[1]);
+                        JSONObject raw = res.getJSONObject(i);
+                        if (!Languages.keep(raw)) continue;
+                        Item it = parseItem(raw, s[1]);
                         if (it == null || it.backdrop.isEmpty() || !seen.add(it.key())) continue;
+                        Languages.remember(it, raw);
                         found.add(it);
                     }
                 } catch (Exception ignored) {
@@ -287,7 +291,6 @@ public class ArtworkDream extends DreamService {
         }));
     }
 
-    /** Puts the picture and its title (logo or text) on screen. */
     private void show(final Item it, Bitmap b, final Bitmap logo) {
         ImageView back = layers[1 - front];
         ImageView old = layers[front];
@@ -307,8 +310,8 @@ public class ArtworkDream extends DreamService {
                 titleView.setVisibility(View.VISIBLE);
                 logoView.setVisibility(View.GONE);
             }
-            metaView.setText(meta(it));
-            // Shift the text slightly each time so nothing stays in one spot
+            String lang = Languages.foreignName(it);
+            metaView.setText(meta(it) + (lang == null ? "" : SEP + lang));
             caption.setTranslationX(nudge());
             caption.setTranslationY(nudge());
             clockBox.setTranslationX(nudge());
@@ -317,27 +320,30 @@ public class ArtworkDream extends DreamService {
         }).start();
     }
 
-    /** Finds the official English title logo (PNG) for a film or series, or "" if there isn't one. */
-    private void findLogo(final Item it, final Consumer<String> done) {
+    /** Finds the official title logo (PNG): English first, then Hindi or Punjabi, then no language. */
+    private void findLogo(final Item it, final Done done) {
         String cached = logoPaths.get(it.key());
         if (cached != null) {
-            done.accept(cached);
+            done.got(cached);
             return;
         }
         new Thread(() -> {
             String path = "";
             try {
                 JSONObject o = new JSONObject(tmdbGet("/" + it.type + "/" + it.id
-                        + "/images?include_image_language=en,null"));
+                        + "/images?include_image_language=en,hi,pa,null"));
                 JSONArray logos = o.optJSONArray("logos");
                 if (logos != null) {
-                    // First choice: English; second: no language. PNG only (SVG can't be shown).
-                    for (int pass = 0; pass < 2 && path.isEmpty(); pass++) {
+                    for (int pass = 0; pass < 3 && path.isEmpty(); pass++) {
                         for (int i = 0; i < logos.length(); i++) {
                             JSONObject l = logos.getJSONObject(i);
                             String lang = str(l, "iso_639_1");
+                            if ("null".equals(lang)) lang = "";
                             String fp = str(l, "file_path");
-                            boolean langOk = pass == 0 ? "en".equals(lang) : lang.isEmpty();
+                            boolean langOk;
+                            if (pass == 0) langOk = "en".equals(lang);
+                            else if (pass == 1) langOk = "hi".equals(lang) || "pa".equals(lang);
+                            else langOk = lang.isEmpty();
                             if (langOk && fp.toLowerCase().endsWith(".png")) {
                                 path = fp;
                                 break;
@@ -350,12 +356,11 @@ public class ArtworkDream extends DreamService {
             final String p = path;
             handler.post(() -> {
                 logoPaths.put(it.key(), p);
-                done.accept(p);
+                done.got(p);
             });
         }).start();
     }
 
-    /** Slow zoom and sideways drift across the picture. */
     private void drift(ImageView v) {
         float dx = (random.nextBoolean() ? 1f : -1f) * dp(30);
         ObjectAnimator an = ObjectAnimator.ofPropertyValuesHolder(v,
