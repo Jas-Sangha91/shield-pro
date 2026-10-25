@@ -1,7 +1,6 @@
 # Sangha Home — Guide
 
-A custom home screen for the Nvidia Shield TV Pro.
-Last updated: 24 October 2026
+A custom home screen for the Nvidia Shield TV Pro. Last updated: 25 October 2026
 
 ---
 
@@ -19,6 +18,7 @@ Last updated: 24 October 2026
 | Update command | `sangha-update` (in Terminal) |
 | Signing key | `app/sangha.keystore` (password `sanghahome`, alias `sangha`) — **never delete** |
 | Backup file on Shield | `/sdcard/Android/data/com.jas.shieldhome/files/sangha-home-backup.json` |
+| Error log | `./adb logcat -s SanghaHome` (see section 1D) |
 
 ---
 
@@ -30,6 +30,7 @@ Last updated: 24 October 2026
 2. **Before committing a long file, scroll to the bottom** and check it ends properly (usually a single `}` on its own line). Long pastes sometimes get cut off.
 3. Open the **Actions** tab and wait for the green tick.
 4. When a change touches several files, the builds in between may fail (red cross) or be cancelled (grey "!"). That's expected. Only the build after the **last** file matters.
+5. For a **new file**, click **Add file → Create new file** in the code folder and type the full name, for example `app/src/main/java/com/jas/shieldhome/BrowsePage.java`.
 
 ### 1B. Install from the Mac (preferred)
 
@@ -89,9 +90,20 @@ Open **Downloader** on the Shield, enter the latest APK link from the quick refe
 | Build error `cannot find symbol` | Usually a file is missing or out of date. Check every file from the last change was committed. |
 | Build fails after uploading an image | Files in `res/drawable` must be named in lower case with only letters, numbers and underscores (for example `tmdb_logo.png`). SVG files aren't allowed there. |
 | Any other build error | Open the failed run → the red step → copy the lines containing `error:`. They name the file and line number. |
+| **"Couldn't load Discover"** | Look at the **Details** line under the message, which says what went wrong. No Details line usually means a real connection problem (internet or VPN). Discover waits 30 seconds before trying again. If Search finds films, TMDB is working and it's a code problem: send the Details line. |
+| **A Discover row is missing** | That row failed on its own and the rest loaded. Check the error log (below). |
+| **Browse says "Couldn't find that subgenre on TMDB right now"** | TMDB's keyword search didn't answer. Try again later. Once a subgenre works, it's remembered. |
 | Most apps disappear from Home and Apps | `AndroidManifest.xml` has lost its "see all apps" lines. See section 8. Don't back up until it's fixed. |
 | An app tile shows a code name and plain icon | The app updated and Sangha Home hadn't refreshed. This now fixes itself within seconds. If not, run `./adb shell am force-stop com.jas.shieldhome` and press Home. |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | The signing key has changed. Check `app/sangha.keystore` still exists. As a last resort: back up and copy to the Mac (section 3), restore Google's home screen (section 5B), `./adb uninstall com.jas.shieldhome`, install again, then restore the backup. |
+
+**Reading the error log.** Sangha Home writes problems to the Shield's system log. To watch it live, open Discover (or whatever isn't working) while this runs, then press Ctrl+C to stop:
+
+```
+cd ~/Downloads/platform-tools
+./adb connect 192.168.1.197:5555
+./adb logcat -s SanghaHome
+```
 
 ### 1E. Going back to an earlier version
 
@@ -117,13 +129,13 @@ GitHub keeps every version of every file. Open the file → **History** → pick
 
 ### Home wallpaper
 
-- Sharp trending film and series artwork across the top of the screen, fading into dark before the Watch row. It changes every 30 seconds.
+- Sharp film and series artwork across the top of the screen, fading into dark before the Watch row. It changes every 30 seconds.
+- **The mix:** trending titles plus popular Hindi and Punjabi titles, following your languages (see Languages below).
 - Darker on the left and top, and behind the clock, so text stays readable on any picture.
-- **Caption** under the weather: title · rating · year · type · "Play for info".
+- **Caption** under the weather: title · rating · year · type · language (international titles only) · "Play for info".
 - **Press Play/Pause** on the remote to open that title's info card (trailer, Where to watch and so on).
 - The colour glow from the selected app is softened while artwork is showing.
-- **Home only.** Discover and Apps keep plain backgrounds.
-- **Switch it on or off:** cog → Home wallpaper.
+- **Switch it on or off:** cog → Home wallpaper. This only affects Home. The Discover background is always on.
 
 ### Weather
 
@@ -152,10 +164,53 @@ When moving, use the arrows, press OK to drop, or Back to cancel.
 
 ### Discover
 
-- **Tonight's pick:** five rotating picks with Trailer, My list and Surprise me.
-- **Rows:** My list, Trending this week, New and highly rated, Binge-worthy series, Tonight's mood and Coming soon.
-- **OK on a poster** opens the info card: rating, age rating, genres, length, cast, trailer, My list, **Where to watch** and More like this.
+From top to bottom:
+
+1. **Tonight's pick:** five rotating picks with Trailer, My list and Surprise me.
+2. **Browse by genre:** Horror, Comedy, Action, Thriller, Sci-fi, Drama, Crime, Mystery, Romance, Fantasy, Animation, Family, Documentary, War, Western and **All filters**. Each opens Browse (below).
+3. **My list**
+4. **Trending this week**
+5. **Hindi and Punjabi:** popular Hindi and Punjabi films, two Hindi to one Punjabi.
+6. **New and highly rated**, **Binge-worthy series**, **Tonight's mood** (a different genre each day) and **Coming soon**.
+
+Also:
+
+- **The background follows the highlighted poster.** Pause on a poster and, after a moment, the artwork behind the page fades to that title. Fast scrolling doesn't flicker.
+- **OK on a poster** opens the info card: rating, age rating, genres, length, language (international titles), cast, trailer, My list, **Where to watch** and More like this.
 - **Hold OK on a poster:** More info · Trailer · Add to or Remove from My list.
+- **Language labels:** international titles show a small label, for example "Korean", in the poster's bottom corner.
+- Everything follows your languages (see Languages below). Discover refreshes every 3 hours.
+- If one row can't load, the rest still appear.
+
+### Browse
+
+A full-screen page of every film and series on TMDB, from any country and any service, whether or not you can stream it.
+
+- **Opening it:** a genre button on Discover, **All filters**, a genre shortcut in Search, or a person in Search.
+- **It always opens on Popular**, with any decade and length. **Films or Series** is remembered from last time. All filters opens on **All films**.
+- **Filter buttons** along the top (press one to choose from a list):
+  - **Films / Series**
+  - **Genre**
+  - **Subgenre** (Horror and Comedy only):
+    - Horror: Slasher, Supernatural, Found footage, Zombie, Ghost, Haunted house, Vampire, Creature feature, Body horror, Psychological
+    - Comedy: Romantic comedy, Dark comedy, Spoof, Stand-up
+  - **Sort:** Popular, Top rated, Newest, Hidden gems (well rated but less well known)
+  - **Decade:** Any, 2020s, 2010s, 2000s, 1990s, 1980s, Older
+  - **Length** (films only): Any, Under 100 min, About 2 hours, Long (over 2h 20m)
+- **Posters** fill a grid seven across, and more load as you move down. OK opens the info card, and Back closes Browse.
+- The highlighted title and its details show at the top, and the background follows the highlighted poster.
+- The first time you use each subgenre there's a short pause while it looks up TMDB's tag. After that it's remembered.
+- **Good to know:** subgenres rely on TMDB's community tags, so popular and older films are covered best. Horror **series** are the thinnest, because TMDB has no horror genre for series.
+
+### Languages
+
+Sangha Home shows **English, Hindi and Punjabi** titles, plus **big international hits** (anything with at least 1,000 ratings on TMDB). These are the most likely to have an English or Hindi dub.
+
+- This applies to Discover, Browse, Tonight's pick, Surprise me, More like this, the Home wallpaper and the screensaver.
+- **Search isn't filtered**, so typing a title always finds it.
+- International titles get a **language label** (poster, info card, wallpaper caption and screensaver), so you know to check the audio.
+- TMDB doesn't record which dubs a service offers, so a labelled title may or may not have English audio. Check in the app.
+- The languages and the 1,000-ratings threshold are set in `Languages.java` (`MINE` and `HIT_VOTES`).
 
 ### Where to watch
 
@@ -165,7 +220,17 @@ When moving, use the arrows, press OK to drop, or Back to cancel.
 
 ### Search
 
-Searches your apps instantly, plus every film and series. Recent searches show when the box is empty.
+Searches your apps instantly, plus every film, series and person in every language. Recent searches (the last six) show when the box is empty.
+
+- **Genre shortcuts:** type a genre or subgenre and a **Browse** row appears at the top straight away. For example "horror" gives **Horror films**, "slasher" gives **Horror films · Slasher**, and "romcom" gives **Comedy films · Romantic comedy**. Press it to open Browse with those filters, and Back returns to your search.
+  - Add "series" or "films" to choose the type ("horror series"). Otherwise it uses your last Browse choice.
+  - Everyday words work too: scary, funny, sci-fi, whodunnit, anime, kids, zombie, found footage, haunted, vampire, monster, parody, stand-up and more.
+  - It suggests as you type, so "horr" already offers Horror.
+- **People:** typing an actor's or director's name shows a **People** row with their photo, name and job. If the name is the best match, it comes before films and series.
+  - Choosing someone opens their work: an actor's films and series (without talk shows or "as themselves" appearances), or what a director directed.
+  - Buttons: **Films and series / Films / Series**, and **Best known / Newest**.
+  - It follows your languages, unless all their work is in other languages, in which case it shows everything.
+  - People without a photo on TMDB are left out of the row. If someone's missing, search one of their films and look at the cast on the info card.
 
 ### Cog menu
 
@@ -178,7 +243,10 @@ Searches your apps instantly, plus every film and series. Recent searches show w
 
 ### Screensaver
 
-- Full-screen artwork that slowly drifts and fades every 20 seconds, with the title bottom left and the clock top right. The text shifts slightly each time to avoid burn-in.
+- Full-screen artwork that slowly drifts and fades every 20 seconds, with the clock top right. The text shifts slightly each time to avoid burn-in.
+- **Title logos:** the film's official logo is shown bottom left when TMDB has one (English first, then Hindi or Punjabi), otherwise the title as text. Rating, year, type and language (international titles) are shown underneath.
+- **The mix:** trending, top-rated films and series, and popular Hindi and Punjabi titles, following your languages.
+- **Remote:** **left and right** skip to the previous or next picture. **Volume** works as normal. Any other button ends the screensaver.
 - **Turn it on:** Settings → Device Preferences → Screen saver → Screen saver → **Sangha Home artwork**. **Start now** previews it.
 - **If it's not in the list:**
   ```
@@ -200,7 +268,7 @@ Cog → **Backup and restore**:
 - **Back up now** saves the dock, sections, folders, apps on Home, My list, recent searches, weather, clock and wallpaper settings.
 - **Restore** puts them all back (it asks you to confirm).
 
-The backup survives updates, but **not an uninstall**. Back up after any big layout change.
+The backup survives updates, but **not an uninstall**. Back up after any big layout change. Browse's last Films/Series choice and the remembered subgenre tags aren't in the backup, but they come back on their own as you use Browse.
 
 ### Copy it to the Mac
 
@@ -288,11 +356,13 @@ for p in com.nvidia.stats com.nvidia.feedback com.google.android.feedback com.nv
 | `MainActivity.java` | The screen, top bar, tabs, Home and Apps pages, tiles, cog menu, Play/Pause shortcut |
 | `Layout.java` | What's on Home and where, including remembering missing apps |
 | `Menus.java` | All the hold-OK menus |
-| `DiscoverPage.java` | Discover, Tonight's pick, My list and the info card |
+| `DiscoverPage.java` | Discover, Tonight's pick, Browse by genre row, My list, the rows and the info card |
+| `BrowsePage.java` | Browse: genres, subgenres, filters, the poster grid, and a person's films and series |
+| `Languages.java` | Which languages are shown, the international hit rule, and language labels |
 | `WhereToWatch.java` | The "Where to watch" row |
-| `SearchScreen.java` | Search |
-| `Wallpaper.java` | The Home wallpaper and its caption |
-| `ArtworkDream.java` | The screensaver |
+| `SearchScreen.java` | Search, genre shortcuts and people |
+| `Wallpaper.java` | The Home wallpaper and caption, and the Discover background that follows the poster |
+| `ArtworkDream.java` | The screensaver, with title logos and left/right skipping |
 | `WeatherClock.java` | Weather, forecast card and clock time zone |
 | `VpnStatus.java` | The VPN button and city |
 | `Backup.java` | Backup and restore |
@@ -317,6 +387,7 @@ for p in com.nvidia.stats com.nvidia.feedback com.google.android.feedback com.nv
 **GitHub secret:** `TMDB_TOKEN` (Settings → Secrets and variables → Actions).
 
 **Going private:** this hides the code, keystore and token, but the download link stops working. Either switch to public briefly for each update, or install GitHub's command-line tool (`brew install gh`, then `gh auth login`) and download with:
+
 ```
 gh release download -R Jas-Sangha91/shield-pro -p sangha-home.apk -D ~/Downloads --clobber
 ```
@@ -350,7 +421,8 @@ The manifest also holds the `INTERNET` and `ACCESS_NETWORK_STATE` permissions, t
 
 | Feature | Source |
 |---|---|
-| Discover, search, wallpaper and screensaver artwork | TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB. |
+| Discover, Browse, search, people, title logos, wallpaper and screensaver artwork | TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB. |
+| Subgenres | TMDB keywords (community tags) |
 | Where to watch | JustWatch, via TMDB |
 | Weather, forecast, place search, clock time zones | Open-Meteo.com |
 | VPN location | ipwho.is |
@@ -369,6 +441,17 @@ Credits appear in cog → About and at the bottom of Discover.
 ---
 
 ## 11. Change log
+
+**25 October 2026**
+
+- Discover background now follows the highlighted poster, Netflix style.
+- Screensaver: left and right skip pictures, official title logos instead of plain text, volume keeps working.
+- New **Browse** page: every film and series worldwide, with genre, subgenre (Horror and Comedy), sort, decade and length filters. Always opens on Popular, and remembers Films or Series.
+- **Browse by genre** row on Discover.
+- **Languages:** English, Hindi and Punjabi plus big international hits, across Discover, Browse, the wallpaper and the screensaver, with language labels on international titles.
+- New **Hindi and Punjabi** row on Discover, and Hindi and Punjabi titles added to the wallpaper and screensaver.
+- Search: **genre shortcuts** that open Browse, and **people** (actors and directors) with their films and series.
+- Discover fix: no longer asks TMDB for pages that don't exist, loads each row separately so one failure doesn't stop the page, and shows a **Details** line when it can't load. Errors are written to the log (`./adb logcat -s SanghaHome`).
 
 **24 October 2026**
 
@@ -394,8 +477,12 @@ Credits appear in cog → About and at the bottom of Discover.
 
 ## 12. Ideas and to-do
 
-- Discover background that changes to match the highlighted poster (Netflix style).
-- Screensaver extras: left/right to skip, textless artwork and title logos.
+- **Help me pick:** three quick questions (mood or genre, how long you have, new or classic) and three picks with reasons. This targets "I don't know what to watch".
+- Trim the Browse by genre row to the most-used genres plus "More genres".
+- Cog setting for languages (instead of editing `Languages.java`).
+- Review the international hit threshold (1,000 ratings), since recent hits take a while to reach it.
+- Where to watch: choose the country, or show other countries when a title isn't on a UK service.
+- Screensaver: textless artwork (pictures without words already on them).
 - Daily restart at 4am (on/off switch in the cog menu).
 - Voice search with the Nvidia remote mic (parked).
 - Keep the TMDB token out of the app and repository.
