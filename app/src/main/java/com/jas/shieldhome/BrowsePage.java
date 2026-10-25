@@ -21,8 +21,12 @@ import org.json.JSONObject;
 
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static com.jas.shieldhome.Tmdb.TMDB_IMG;
@@ -38,7 +42,8 @@ import static com.jas.shieldhome.Ui.str;
 
 /**
  * Browse: every film and series on TMDB (worldwide, any service), filtered by genre, subgenre,
- * sort, decade and length. Follows the language rules in Languages. Remembers the last filters.
+ * sort, decade and length. Also shows a person's films and series (opened from Search).
+ * Follows the language rules in Languages. Remembers the last filters.
  */
 final class BrowsePage {
 
@@ -51,6 +56,7 @@ final class BrowsePage {
     private static final int BATCH = 21;
     private static final int PAGES_PER_BATCH = 4;
     private static final int GIVE_UP_PAGE = 20;
+    private static final int PERSON_MAX = 120;
     private static final int BG = 0xFF0A0D14;
 
     static final class Genre {
@@ -81,9 +87,15 @@ final class BrowsePage {
             {"Body horror", "body horror"},
             {"Psychological", "psychological horror"}};
 
+    private static final String[][] COMEDY_SUBS = {
+            {"Romantic comedy", "romantic comedy"},
+            {"Dark comedy", "dark comedy"},
+            {"Spoof", "spoof"},
+            {"Stand-up", "stand-up comedy"}};
+
     static final Genre[] GENRES = {
             new Genre("Horror", 27, 0, "horror", HORROR_SUBS),
-            new Genre("Comedy", 35, 35, null, null),
+            new Genre("Comedy", 35, 35, null, COMEDY_SUBS),
             new Genre("Action", 28, 10759, null, null),
             new Genre("Thriller", 53, 9648, null, null),
             new Genre("Sci-fi", 878, 10765, null, null),
@@ -103,6 +115,9 @@ final class BrowsePage {
     private static final String[] DECADES = {"Any decade", "2020s", "2010s", "2000s", "1990s", "1980s", "Older"};
     private static final String[] LENGTHS = {"Any length", "Under 100 min", "About 2 hours", "Long, over 2h 20m"};
 
+    private static final String[] PERSON_SHOW = {"Films and series", "Films", "Series"};
+    private static final String[] PERSON_SORT = {"Best known", "Newest"};
+
     private interface Pick {
         void pick(int which);
     }
@@ -112,6 +127,15 @@ final class BrowsePage {
 
     // Filters (remembered)
     private int type, genre, sub, sort, decade, length;
+
+    // Person mode (opened from Search)
+    private int personId = 0;
+    private String personName = "";
+    private String personDept = "";
+    private int personShow = 0;
+    private int personSort = 0;
+    private List<Item> personAll = null;
+    private final Map<String, Integer> personVotes = new HashMap<>();
 
     // Screen
     private Dialog dialog;
@@ -156,16 +180,64 @@ final class BrowsePage {
         return a.dp(v);
     }
 
+    // ---------- Helpers for Search ----------
+
+    static int genreIndex(String name) {
+        for (int i = 0; i < GENRES.length; i++) if (GENRES[i].name.equals(name)) return i;
+        return -1;
+    }
+
+    static int subIndex(int g, String label) {
+        if (g < 0 || g >= GENRES.length || GENRES[g].subs == null || label == null) return -1;
+        String[][] subs = GENRES[g].subs;
+        for (int i = 0; i < subs.length; i++) if (subs[i][0].equals(label)) return i;
+        return -1;
+    }
+
+    /** The last Films/Series choice (0 = films, 1 = series). */
+    static int savedType(MainActivity a) {
+        return clamp(a.prefs.getInt("browse_type", 0), TYPES.length);
+    }
+
     // ---------- Opening ----------
 
     /** Opens Browse on a genre (index into GENRES), -1 for any genre, or KEEP for the last one. */
     void open(int genreIndex) {
+        personId = 0;
         loadFilters();
         if (genreIndex != KEEP && genreIndex != genre) {
             genre = genreIndex;
             sub = -1;
             saveFilters();
         }
+        start();
+    }
+
+    /** Opens Browse with a genre, subgenre (-1 = any) and type (0 films, 1 series, -1 = last used). */
+    void openWith(int genreIndex, int subIndex, int typeIndex) {
+        personId = 0;
+        loadFilters();
+        if (typeIndex == 0 || typeIndex == 1) type = typeIndex;
+        if (genreIndex >= -1 && genreIndex < GENRES.length) genre = genreIndex;
+        boolean subOk = genre >= 0 && GENRES[genre].subs != null && subIndex >= 0 && subIndex < GENRES[genre].subs.length;
+        sub = subOk ? subIndex : -1;
+        saveFilters();
+        start();
+    }
+
+    /** Opens a person's films and series. dept is TMDB's "known for" department (Acting, Directing...). */
+    void openPerson(int id, String name, String dept) {
+        personId = id;
+        personName = name == null ? "" : name;
+        personDept = dept == null ? "" : dept;
+        personShow = 0;
+        personSort = 0;
+        personAll = null;
+        personVotes.clear();
+        start();
+    }
+
+    private void start() {
         pendingBg = null;
         bgKey = null;
         build();
@@ -206,7 +278,6 @@ final class BrowsePage {
         FrameLayout root = new FrameLayout(a);
         root.setBackgroundColor(BG);
 
-        // Artwork across the top, fading into dark, darker on the left
         int artH = Math.round(a.getResources().getDisplayMetrics().heightPixels * 0.62f);
         FrameLayout art = new FrameLayout(a);
         root.addView(art, new FrameLayout.LayoutParams(MATCH, artH, Gravity.TOP));
@@ -235,7 +306,6 @@ final class BrowsePage {
         page.setClipChildren(false);
         root.addView(page, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        // Header: label, highlighted title and details, filter buttons
         LinearLayout header = new LinearLayout(a);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setPadding(dp(40), dp(26), dp(40), dp(4));
@@ -244,7 +314,7 @@ final class BrowsePage {
 
         TextView label = new TextView(a);
         a.style(label, 13, true, 0xFFC9A8F0);
-        label.setText("Browse");
+        label.setText(personId != 0 ? "People" : "Browse");
         header.addView(label, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         infoTitle = new TextView(a);
@@ -275,7 +345,6 @@ final class BrowsePage {
 
         page.addView(header, new LinearLayout.LayoutParams(MATCH, WRAP));
 
-        // Poster grid
         ScrollView scroll = new ScrollView(a);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipChildren(false);
@@ -321,42 +390,53 @@ final class BrowsePage {
     private void buildPills(String focusKey) {
         pillsRow.removeAllViews();
 
-        addPill("type", TYPES[type], () -> choose("Films or series", TYPES, type, w -> {
-            type = w;
-            changed("type");
-        }));
-
-        addPill("genre", genre < 0 ? "Any genre" : GENRES[genre].name,
-                () -> choose("Genre", genreOptions(), genre + 1, w -> {
-                    genre = w - 1;
-                    sub = -1;
-                    changed("genre");
-                }));
-
-        final Genre g = genre >= 0 ? GENRES[genre] : null;
-        if (g != null && g.subs != null) {
-            addPill("sub", sub < 0 ? "Any subgenre" : g.subs[sub][0],
-                    () -> choose(g.name + " subgenre", subOptions(g), sub + 1, w -> {
-                        sub = w - 1;
-                        changed("sub");
-                    }));
-        }
-
-        addPill("sort", SORTS[sort], () -> choose("Sort", SORTS, sort, w -> {
-            sort = w;
-            changed("sort");
-        }));
-
-        addPill("decade", DECADES[decade], () -> choose("Decade", DECADES, decade, w -> {
-            decade = w;
-            changed("decade");
-        }));
-
-        if (type == 0) {
-            addPill("length", LENGTHS[length], () -> choose("Length", LENGTHS, length, w -> {
-                length = w;
-                changed("length");
+        if (personId != 0) {
+            addPill("pshow", PERSON_SHOW[personShow], () -> choose("Show", PERSON_SHOW, personShow, w -> {
+                personShow = w;
+                personChanged("pshow");
             }));
+            addPill("psort", PERSON_SORT[personSort], () -> choose("Sort", PERSON_SORT, personSort, w -> {
+                personSort = w;
+                personChanged("psort");
+            }));
+        } else {
+            addPill("type", TYPES[type], () -> choose("Films or series", TYPES, type, w -> {
+                type = w;
+                changed("type");
+            }));
+
+            addPill("genre", genre < 0 ? "Any genre" : GENRES[genre].name,
+                    () -> choose("Genre", genreOptions(), genre + 1, w -> {
+                        genre = w - 1;
+                        sub = -1;
+                        changed("genre");
+                    }));
+
+            final Genre g = genre >= 0 ? GENRES[genre] : null;
+            if (g != null && g.subs != null) {
+                addPill("sub", sub < 0 ? "Any subgenre" : g.subs[sub][0],
+                        () -> choose(g.name + " subgenre", subOptions(g), sub + 1, w -> {
+                            sub = w - 1;
+                            changed("sub");
+                        }));
+            }
+
+            addPill("sort", SORTS[sort], () -> choose("Sort", SORTS, sort, w -> {
+                sort = w;
+                changed("sort");
+            }));
+
+            addPill("decade", DECADES[decade], () -> choose("Decade", DECADES, decade, w -> {
+                decade = w;
+                changed("decade");
+            }));
+
+            if (type == 0) {
+                addPill("length", LENGTHS[length], () -> choose("Length", LENGTHS, length, w -> {
+                    length = w;
+                    changed("length");
+                }));
+            }
         }
 
         View focus = pillsRow.getChildCount() > 0 ? pillsRow.getChildAt(0) : null;
@@ -407,12 +487,25 @@ final class BrowsePage {
         reload();
     }
 
+    private void personChanged(String key) {
+        buildPills(key);
+        reload();
+    }
+
     private String summary() {
         String what = type == 0 ? "films" : "series";
         String g = genre >= 0 ? GENRES[genre].name : "All";
         String s = "";
         if (genre >= 0 && GENRES[genre].subs != null && sub >= 0) s = SEP + GENRES[genre].subs[sub][0];
         return g + " " + what + s;
+    }
+
+    private static String deptLabel(String dept) {
+        if (dept == null || dept.isEmpty() || dept.equals("Acting")) return "Actor";
+        if (dept.equals("Directing")) return "Director";
+        if (dept.equals("Writing")) return "Writer";
+        if (dept.equals("Production")) return "Producer";
+        return dept;
     }
 
     // ---------- Results ----------
@@ -429,6 +522,16 @@ final class BrowsePage {
         grid.removeAllViews();
         status.setVisibility(View.VISIBLE);
         status.setText("Loading\u2026");
+
+        if (personId != 0) {
+            done = true;
+            infoTitle.setText(personName);
+            infoMeta.setText(deptLabel(personDept));
+            if (personAll == null) fetchPerson();
+            else showPerson();
+            return;
+        }
+
         infoTitle.setText(summary());
         infoMeta.setText(SORTS[sort] + (decade > 0 ? SEP + DECADES[decade] : "")
                 + (type == 0 && length > 0 ? SEP + LENGTHS[length] : ""));
@@ -592,6 +695,107 @@ final class BrowsePage {
         return id;
     }
 
+    // ---------- Person ----------
+
+    private void fetchPerson() {
+        loading = true;
+        final int gen = generation;
+        final int id = personId;
+        final String dept = personDept;
+        new Thread(() -> {
+            List<Item> use = null;
+            final Map<String, Integer> votes = new HashMap<>();
+            try {
+                JSONObject o = new JSONObject(tmdbGet("/person/" + id + "/combined_credits?language=en-US"));
+                boolean acting = dept.isEmpty() || "Acting".equals(dept);
+                JSONArray list = o.optJSONArray(acting ? "cast" : "crew");
+                List<Item> kept = new ArrayList<>();
+                List<Item> all = new ArrayList<>();
+                Set<String> keys = new HashSet<>();
+                if (list != null) {
+                    for (int i = 0; i < list.length(); i++) {
+                        JSONObject raw = list.getJSONObject(i);
+                        if (!acting && !dept.equals(str(raw, "department"))) continue;
+                        if (str(raw, "character").toLowerCase().contains("self")) continue;
+                        if (hasGenre(raw, 10767) || hasGenre(raw, 10763) || hasGenre(raw, 10764)) continue;
+                        Item it = parseItem(raw, null);
+                        if (it == null || it.poster == null || it.poster.isEmpty()) continue;
+                        if (!keys.add(it.key())) continue;
+                        Languages.remember(it, raw);
+                        votes.put(it.key(), raw.optInt("vote_count", 0));
+                        all.add(it);
+                        if (Languages.keep(raw)) kept.add(it);
+                    }
+                }
+                // Your languages first; if this person's work is all in other languages, show it all
+                use = kept.isEmpty() ? all : kept;
+                sortByVotes(use, votes);
+                if (use.size() > PERSON_MAX) use = new ArrayList<>(use.subList(0, PERSON_MAX));
+            } catch (Exception ignored) {
+            }
+            final List<Item> result = use;
+            a.runOnUiThread(() -> {
+                if (gen != generation) return;
+                loading = false;
+                if (result == null) {
+                    status.setText("Couldn't load. Check the internet connection, then try again.");
+                    return;
+                }
+                personAll = result;
+                personVotes.clear();
+                personVotes.putAll(votes);
+                showPerson();
+            });
+        }).start();
+    }
+
+    private void showPerson() {
+        List<Item> list = new ArrayList<>();
+        for (Item it : personAll) {
+            if (personShow == 1 && !"movie".equals(it.type)) continue;
+            if (personShow == 2 && !"tv".equals(it.type)) continue;
+            list.add(it);
+        }
+        if (personSort == 1) {
+            Collections.sort(list, new Comparator<Item>() {
+                @Override
+                public int compare(Item x, Item y) {
+                    String dx = x.date == null ? "" : x.date;
+                    String dy = y.date == null ? "" : y.date;
+                    return dy.compareTo(dx);
+                }
+            });
+        }
+        for (Item it : list) if (seen.add(it.key())) addPoster(it);
+        if (count == 0) {
+            status.setVisibility(View.VISIBLE);
+            status.setText("Nothing found.");
+        } else {
+            status.setVisibility(View.GONE);
+        }
+        infoMeta.setText(deptLabel(personDept) + SEP + count + (count == 1 ? " title" : " titles"));
+    }
+
+    private static boolean hasGenre(JSONObject raw, int id) {
+        JSONArray g = raw.optJSONArray("genre_ids");
+        if (g == null) return false;
+        for (int i = 0; i < g.length(); i++) if (g.optInt(i) == id) return true;
+        return false;
+    }
+
+    private static void sortByVotes(List<Item> list, final Map<String, Integer> votes) {
+        Collections.sort(list, new Comparator<Item>() {
+            @Override
+            public int compare(Item x, Item y) {
+                Integer vx = votes.get(x.key());
+                Integer vy = votes.get(y.key());
+                return Integer.compare(vy == null ? 0 : vy, vx == null ? 0 : vx);
+            }
+        });
+    }
+
+    // ---------- Posters ----------
+
     private void addPoster(final Item it) {
         if (rowView == null || inRow == COLS) {
             rowView = new LinearLayout(a);
@@ -627,7 +831,6 @@ final class BrowsePage {
         a.handler.removeCallbacks(bgRun);
         a.handler.postDelayed(bgRun, 350);
 
-        // Near the bottom: load the next batch
         if (index >= count - COLS * 2) loadMore();
     }
 }
