@@ -45,7 +45,7 @@ import static com.jas.shieldhome.Ui.str;
 final class Wallpaper {
 
     /** How much lower the dock sits on Home while the artwork is on (below the shorter Home header). */
-    static final int HERO_GAP_DP = 210;
+    static final int HERO_GAP_DP = 190;
 
     private static final long EVERY_MS = 30 * 1000L;
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
