@@ -99,7 +99,6 @@ public class MainActivity extends Activity {
     private TextView weatherSep;
     private FrameLayout cogBtn;
     private View dockBand;
-    private View moreInfo;
     private boolean renderedHero = false;
     private TextView hintView;
     private TextView tabHome, tabDiscover, tabApps;
@@ -719,7 +718,6 @@ public class MainActivity extends Activity {
         idle = false;
         firstTile = null;
         dockBand = null;
-        moreInfo = null;
 
         hintView.setVisibility(movingPkg != null ? View.VISIBLE : View.GONE);
         metaView.setText("");
@@ -740,11 +738,13 @@ public class MainActivity extends Activity {
 
         if (page == PAGE_DISCOVER) {
             discover.render();
+            heroChanged();
             return;
         }
 
         if (page == PAGE_APPS) renderApps();
         else renderHome();
+        heroChanged();
 
         if (takeFocus) {
             View target = focusPkg != null ? tileByPkg.get(focusPkg) : null;
@@ -754,20 +754,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
-        // With the artwork on, the dock sits lower so the picture has the top half of the screen,
-        // with the More info button just above the dock
+        // With the artwork on, the dock sits lower so the picture has the top half of the screen
         renderedHero = wallpaper.heroOn();
         if (renderedHero) {
-            FrameLayout hero = new FrameLayout(this);
-            hero.setClipChildren(false);
-            hero.setClipToPadding(false);
-            moreInfo = moreInfoButton();
-            FrameLayout.LayoutParams mlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START);
-            mlp.leftMargin = dp(10);
-            mlp.bottomMargin = dp(16);
-            hero.addView(moreInfo, mlp);
-            content.addView(hero, new LinearLayout.LayoutParams(MATCH, dp(Wallpaper.HERO_GAP_DP)));
-            heroChanged();
+            content.addView(new View(this), new LinearLayout.LayoutParams(MATCH, dp(Wallpaper.HERO_GAP_DP)));
         }
 
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
@@ -806,30 +796,33 @@ public class MainActivity extends Activity {
         addGroupSection("Tools", Layout.TOOLS);
     }
 
-    /** The More info button: ⓘ icon and label, white when highlighted. Opens the info card. */
-    private View moreInfoButton() {
+    /**
+     * The small More info button under the description: ⓘ icon and label, white when highlighted.
+     * Opens the info card. Wallpaper places it; MainActivity looks after focus and visibility.
+     */
+    View moreInfoButton() {
         final LinearLayout b = new LinearLayout(this);
         b.setOrientation(LinearLayout.HORIZONTAL);
         b.setGravity(Gravity.CENTER_VERTICAL);
-        b.setPadding(dp(14), dp(8), dp(18), dp(8));
+        b.setPadding(dp(10), dp(5), dp(13), dp(5));
         b.setFocusable(true);
         b.setClickable(true);
         b.setPivotX(0f);
         final GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(20));
+        bg.setCornerRadius(dp(14));
         bg.setColor(0x26FFFFFF);
         b.setBackground(bg);
 
-        final Drawable icon = Icons.make(Icons.INFO, dp(18));
+        final Drawable icon = Icons.make(Icons.INFO, dp(14));
         icon.setTint(0xFFFFFFFF);
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(icon);
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(18), dp(18));
-        ilp.rightMargin = dp(8);
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(14), dp(14));
+        ilp.rightMargin = dp(6);
         b.addView(iv, ilp);
 
         final TextView tv = new TextView(this);
-        style(tv, 15, false, 0xFFFFFFFF);
+        style(tv, 13, false, 0xFFFFFFFF);
         tv.setText("More info");
         b.addView(tv, new LinearLayout.LayoutParams(WRAP, WRAP));
 
@@ -837,10 +830,10 @@ public class MainActivity extends Activity {
             bg.setColor(f ? 0xFFFFFFFF : 0x26FFFFFF);
             tv.setTextColor(f ? DARK : 0xFFFFFFFF);
             icon.setTint(f ? DARK : 0xFFFFFFFF);
-            v.animate().scaleX(f ? 1.06f : 1f).scaleY(f ? 1.06f : 1f).setDuration(120).start();
+            v.animate().scaleX(f ? 1.08f : 1f).scaleY(f ? 1.08f : 1f).setDuration(120).start();
             if (f) {
                 topRowFocused();
-                handler.post(() -> scroll.smoothScrollTo(0, 0));
+                if (scroll != null) handler.post(() -> scroll.smoothScrollTo(0, 0));
             }
         });
         b.setOnClickListener(v -> {
@@ -850,12 +843,17 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** Shows the More info button only while there's a title on screen to open. */
+    /** Shows the More info button only on Home while there's a title on screen to open. */
     void heroChanged() {
-        if (moreInfo == null) return;
-        boolean show = page == PAGE_HOME && wallpaper.currentItem() != null;
-        if (!show && moreInfo.hasFocus() && firstTile != null) firstTile.requestFocus();
-        moreInfo.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+        if (wallpaper == null) return;
+        View b = wallpaper.moreInfo();
+        if (b == null) return;
+        boolean show = page == PAGE_HOME && movingPkg == null && wallpaper.currentItem() != null;
+        if (!show && b.hasFocus()) {
+            if (firstTile != null) firstTile.requestFocus();
+            else if (tabHome != null) tabHome.requestFocus();
+        }
+        b.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
     }
 
     /** The artwork has started or stopped loading altogether: move the dock down or up to match. */
