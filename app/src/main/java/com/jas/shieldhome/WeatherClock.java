@@ -33,7 +33,9 @@ import static com.jas.shieldhome.Ui.str;
 
 /**
  * Weather (data by Open-Meteo.com) and the clock time zone (display only, the Shield's time is unchanged).
- * The Home line shows now, plus today's high and low. Press OK on it for the full forecast.
+ * The date line under the clock shows the icon and temperature now. Press OK on it for the full forecast.
+ * The weather hides itself while loading, when no location is set, and when the clock is set to a
+ * different time zone from the weather location (so the two never disagree).
  */
 final class WeatherClock {
 
@@ -53,13 +55,19 @@ final class WeatherClock {
         if (System.currentTimeMillis() - lastFetch >= EVERY_MS) fetch();
     }
 
+    /** Clears the weather until fresh data arrives. */
     void showPlaceholder() {
         a.weatherView.setText("");
-        if (a.prefs.contains("wx_lat")) {
-            a.placeView.setText(a.prefs.getString("wx_name", ""));
-        } else {
-            a.placeView.setText("Set weather in Settings");
-        }
+        updateShown();
+    }
+
+    /** Shows the weather on the date line, unless there's nothing to show or the clock is in another time zone. */
+    void updateShown() {
+        JSONObject o = lastData;
+        boolean show = o != null && a.prefs.contains("wx_lat") && a.weatherView.length() > 0;
+        String clockTz = a.prefs.getString("clock_tz", null);
+        if (show && clockTz != null && !clockTz.equals(o.optString("timezone", ""))) show = false;
+        a.showWeather(show);
     }
 
     // ---------- Weather location ----------
@@ -87,7 +95,8 @@ final class WeatherClock {
         final EditText input = placeInput();
         String current = a.prefs.getString("clock_name", null);
         String msg = "Showing: " + (a.prefs.contains("clock_tz") && current != null ? current : "Shield's time")
-                + "\n\nThis changes the clock on this screen only. The Shield's own time stays the same.";
+                + "\n\nThis changes the clock on this screen only. The Shield's own time stays the same."
+                + " The weather is hidden while the clock shows a different time zone from the weather.";
 
         new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Clock time zone")
@@ -108,6 +117,7 @@ final class WeatherClock {
         if (a.timeClock != null) a.timeClock.setTimeZone(tz);
         if (a.dateClock != null) a.dateClock.setTimeZone(tz);
         if (a.clockPlaceView != null) a.clockPlaceView.setVisibility(View.GONE);
+        updateShown();
     }
 
     // ---------- Place search (shared by weather and clock) ----------
@@ -213,29 +223,16 @@ final class WeatherClock {
                         + "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
                         + "precipitation_probability_max,sunrise,sunset"
                         + "&timezone=auto&forecast_days=7";
-                JSONObject o = new JSONObject(httpGet(url, null));
+                final JSONObject o = new JSONObject(httpGet(url, null));
                 JSONObject cur = o.getJSONObject("current");
                 final long now = Math.round(cur.getDouble("temperature_2m"));
                 final int code = cur.getInt("weather_code");
                 final boolean day = cur.optInt("is_day", 1) == 1;
 
-                String range = "";
-                JSONObject daily = o.optJSONObject("daily");
-                if (daily != null) {
-                    JSONArray hi = daily.optJSONArray("temperature_2m_max");
-                    JSONArray lo = daily.optJSONArray("temperature_2m_min");
-                    if (hi != null && lo != null && hi.length() > 0 && lo.length() > 0) {
-                        range = Math.round(hi.getDouble(0)) + DEG + " / " + Math.round(lo.getDouble(0)) + DEG;
-                    }
-                }
-                final String todayRange = range;
-                lastData = o;
-
                 a.runOnUiThread(() -> {
-                    a.weatherView.setText(symbol(code, day) + "  " + now + DEG);
-                    String place = a.prefs.getString("wx_name", "");
-                    a.placeView.setText(place + GAP + describe(code)
-                            + (todayRange.isEmpty() ? "" : GAP + todayRange));
+                    lastData = o;
+                    a.weatherView.setText(symbol(code, day) + " " + now + DEG);
+                    updateShown();
                 });
             } catch (Exception ex) {
                 lastFetch = 0; // try again on the next check
