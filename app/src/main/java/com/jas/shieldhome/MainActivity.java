@@ -69,7 +69,7 @@ public class MainActivity extends Activity {
     private static final long IDLE_AFTER_MS = 20 * 1000L;
     // Header height: full on Discover and Apps (room for the big title), shorter on Home
     private static final int HEADER_DP = 176;
-    private static final int HEADER_HOME_DP = 96;
+    private static final int HEADER_HOME_DP = 116;
 
     // Shared with the other parts of the app
     PackageManager pm;
