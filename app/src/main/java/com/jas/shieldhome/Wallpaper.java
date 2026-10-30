@@ -28,17 +28,19 @@ import java.util.Set;
 
 import static com.jas.shieldhome.Tmdb.TMDB_IMG;
 import static com.jas.shieldhome.Tmdb.hasToken;
+import static com.jas.shieldhome.Tmdb.meta;
 import static com.jas.shieldhome.Tmdb.parseItem;
 import static com.jas.shieldhome.Tmdb.tmdbGet;
 import static com.jas.shieldhome.Ui.MATCH;
+import static com.jas.shieldhome.Ui.SEP;
 import static com.jas.shieldhome.Ui.WRAP;
 import static com.jas.shieldhome.Ui.str;
 
 /**
  * Artwork behind the screen, Netflix style.
  * Home: recent films and series (see Latest.java) rotate every 30 seconds, following your languages.
- * The artwork has the top half of the screen, with the title's official logo centred on the left
- * (or the title in text). Scrolling down to Watch and below fades the artwork and title away.
+ * The artwork has the top half of the screen. On the left: the title's official logo (or the title in
+ * bold text), a details line and a short description. Scrolling down to Watch and below fades it all away.
  * Play/Pause opens the info card while the artwork is showing.
  * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
  */
@@ -56,12 +58,15 @@ final class Wallpaper {
     private static final int BG = 0xFF0A0D14;
     private static final float ART_HEIGHT = 0.72f;
 
-    // The title: slightly faded, so it doesn't look like an advert
-    private static final float TITLE_ALPHA = 0.85f;
-    private static final int LOGO_MAX_H_DP = 90;
-    private static final int LOGO_MAX_W_DP = 440;
-    private static final int TITLE_TEXT = 0xE6F1F1F1;
-    // The title is centred in this band: from under the tabs to just above the dock
+    // The title block: slightly faded, so it doesn't look like an advert
+    private static final float TITLE_ALPHA = 0.9f;
+    private static final int LOGO_MAX_H_DP = 70;
+    private static final int LOGO_MAX_W_DP = 420;
+    private static final int TEXT_MAX_W_DP = 480;
+    private static final int TITLE_TEXT = 0xF2F1F1F1;
+    private static final int DETAILS_TEXT = 0xD9F1F1F1;
+    private static final int OVERVIEW_TEXT = 0xA6F1F1F1;
+    // The title block is centred in this band: from under the tabs to just above the dock
     private static final int TITLE_TOP_DP = 64;
     private static final int TITLE_AREA_DP = 240;
     // How far the artwork and title drift up as they fade away
@@ -79,6 +84,8 @@ final class Wallpaper {
     private final LinearLayout titleBox;
     private final ImageView logoView;
     private final TextView titleText;
+    private final TextView detailsText;
+    private final TextView overviewText;
     private final Map<String, String> logoPaths = new HashMap<>();
     private int front = 0;
     private boolean hasImage = false;
@@ -172,7 +179,7 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // Title logo (or title text), centred on the left of the artwork
+        // Title block, centred on the left of the artwork: logo or title, details, description
         titleBox = new LinearLayout(a);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setAlpha(0f);
@@ -185,18 +192,44 @@ final class Wallpaper {
         logoView.setVisibility(View.GONE);
         titleBox.addView(logoView, new LinearLayout.LayoutParams(WRAP, WRAP));
 
+        // For titles without a logo: bold condensed lettering, sized to the length of the title
         titleText = new TextView(a);
-        titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 40);
         titleText.setTextColor(TITLE_TEXT);
-        titleText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        titleText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        titleText.setLetterSpacing(-0.01f);
         titleText.setMaxLines(2);
         titleText.setEllipsize(TextUtils.TruncateAt.END);
-        titleText.setMaxWidth(a.dp(520));
+        titleText.setMaxWidth(a.dp(TEXT_MAX_W_DP + 40));
         titleText.setIncludeFontPadding(false);
-        titleText.setLineSpacing(0f, 1.05f);
-        titleText.setShadowLayer(8f, 0f, 2f, 0xCC000000);
+        titleText.setLineSpacing(0f, 0.95f);
+        titleText.setShadowLayer(10f, 0f, 2f, 0xCC000000);
         titleText.setVisibility(View.GONE);
         titleBox.addView(titleText, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        detailsText = new TextView(a);
+        detailsText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        detailsText.setTextColor(DETAILS_TEXT);
+        detailsText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        detailsText.setSingleLine(true);
+        detailsText.setEllipsize(TextUtils.TruncateAt.END);
+        detailsText.setMaxWidth(a.dp(TEXT_MAX_W_DP));
+        detailsText.setShadowLayer(8f, 0f, 2f, 0xCC000000);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        dlp.topMargin = a.dp(12);
+        titleBox.addView(detailsText, dlp);
+
+        overviewText = new TextView(a);
+        overviewText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        overviewText.setTextColor(OVERVIEW_TEXT);
+        overviewText.setMaxLines(2);
+        overviewText.setEllipsize(TextUtils.TruncateAt.END);
+        overviewText.setMaxWidth(a.dp(TEXT_MAX_W_DP));
+        overviewText.setLineSpacing(0f, 1.12f);
+        overviewText.setShadowLayer(8f, 0f, 2f, 0xCC000000);
+        overviewText.setVisibility(View.GONE);
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        olp.topMargin = a.dp(6);
+        titleBox.addView(overviewText, olp);
 
         titleArea = new FrameLayout(a);
         FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL | Gravity.START);
@@ -382,10 +415,20 @@ final class Wallpaper {
                 logoView.setVisibility(View.VISIBLE);
                 titleText.setVisibility(View.GONE);
             } else {
+                titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSize(it.title));
                 titleText.setText(it.title);
                 titleText.setVisibility(View.VISIBLE);
                 logoView.setVisibility(View.GONE);
             }
+
+            // ★ 7.8 · 2026 · Series · Korean
+            String lang = Languages.foreignName(it);
+            detailsText.setText(meta(it) + (lang == null ? "" : SEP + lang));
+
+            String overview = it.overview == null ? "" : it.overview.trim();
+            overviewText.setText(overview);
+            overviewText.setVisibility(overview.isEmpty() ? View.GONE : View.VISIBLE);
+
             if (rotating()) titleBox.animate().alpha(TITLE_ALPHA).setDuration(700).start();
         }).start();
 
@@ -394,6 +437,15 @@ final class Wallpaper {
             a.refreshGlow();
         }
         root.animate().alpha(1f).setDuration(600).start();
+    }
+
+    /** Short titles are big, long ones step down so they fit on two lines. */
+    private static int titleSize(String title) {
+        int n = title == null ? 0 : title.length();
+        if (n <= 12) return 48;
+        if (n <= 20) return 42;
+        if (n <= 30) return 36;
+        return 30;
     }
 
     private void crossfade(Bitmap b, long ms) {
