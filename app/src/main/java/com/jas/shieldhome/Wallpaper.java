@@ -1,426 +1,423 @@
 package com.jas.shieldhome;
 
-import android.app.AlertDialog;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Typeface;
-import android.text.InputType;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
+
+import com.jas.shieldhome.Tmdb.Item;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.net.URLEncoder;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
-import static com.jas.shieldhome.Ui.DEG;
-import static com.jas.shieldhome.Ui.DOT;
+import static com.jas.shieldhome.Tmdb.TMDB_IMG;
+import static com.jas.shieldhome.Tmdb.hasToken;
+import static com.jas.shieldhome.Tmdb.parseItem;
+import static com.jas.shieldhome.Tmdb.tmdbGet;
 import static com.jas.shieldhome.Ui.MATCH;
-import static com.jas.shieldhome.Ui.SOFT_TEXT;
 import static com.jas.shieldhome.Ui.WRAP;
-import static com.jas.shieldhome.Ui.httpGet;
 import static com.jas.shieldhome.Ui.str;
 
 /**
- * Weather (data by Open-Meteo.com) and the clock time zone (display only, the Shield's time is unchanged).
- * The date line under the clock shows the icon and temperature now. Press OK on it for the full forecast.
- * The weather hides itself while loading, when no location is set, and when the clock is set to a
- * different time zone from the weather location (so the two never disagree).
+ * Artwork behind the screen, Netflix style.
+ * Home: artwork rotates every 30 seconds (your languages plus big international hits), with the
+ * title's official logo top left (or the title in text when there's no logo). Play/Pause opens its info card.
+ * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
  */
-final class WeatherClock {
+final class Wallpaper {
 
-    private static final long EVERY_MS = 30 * 60 * 1000L;
-    private static final String GAP = "  " + DOT + "  ";
-    private static final int RAIN_BLUE = 0xFF85B7EB;
+    private static final long EVERY_MS = 30 * 1000L;
+    private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
+    private static final long FADE_MS = 1500L;
+    private static final long FOLLOW_FADE_MS = 700L;
+    private static final long FOLLOW_DELAY_MS = 350L;
+
+    private static final int BG = 0xFF0A0D14;
+    private static final float ART_HEIGHT = 0.72f;
+
+    // The title logo: small and slightly faded, so it doesn't look like an advert
+    private static final float TITLE_ALPHA = 0.85f;
+    private static final int LOGO_MAX_H_DP = 44;
+    private static final int LOGO_MAX_W_DP = 300;
+    private static final int TITLE_TEXT = 0xE6F1F1F1;
+
+    // Where Home artwork comes from: {request, type}
+    private static final String[][] SOURCES = {
+            {"/trending/all/week?language=en-US&page=1", null},
+            {"/trending/all/week?language=en-US&page=2", null},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=20", "movie"},
+            {"/discover/tv?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=10", "tv"},
+            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa&vote_count.gte=3", "movie"}};
+
+    private interface Done {
+        void got(String value);
+    }
 
     private final MainActivity a;
-    private volatile long lastFetch = 0;
-    private volatile JSONObject lastData = null;
+    private final FrameLayout root;
+    private final ImageView[] layers = new ImageView[2];
+    private final LinearLayout titleBox;
+    private final ImageView logoView;
+    private final TextView titleText;
+    private final Map<String, String> logoPaths = new HashMap<>();
+    private int front = 0;
+    private boolean hasImage = false;
+    private boolean running = false;
+    private int lastPage = MainActivity.PAGE_HOME;
 
-    WeatherClock(MainActivity a) {
+    // Home rotation
+    private final List<Item> items = new ArrayList<>();
+    private int index = -1;
+    private Item shown = null;
+    private long loadedAt = 0;
+    private boolean loading = false;
+
+    // Discover follow
+    private Item pendingFollow = null;
+    private String followKey = null;
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            if (!rotating()) return;
+            if (items.isEmpty() || System.currentTimeMillis() - loadedAt > REFRESH_MS) load();
+            else next();
+            a.handler.postDelayed(this, EVERY_MS);
+        }
+    };
+
+    private final Runnable followRun = new Runnable() {
+        @Override
+        public void run() {
+            final Item it = pendingFollow;
+            if (it == null || !following()) return;
+            if (it.key().equals(followKey)) return;
+            a.images.fetchInto(TMDB_IMG + "w1280" + it.backdrop, b -> {
+                if (b == null || !following() || pendingFollow != it) return;
+                followKey = it.key();
+                crossfade(b, FOLLOW_FADE_MS);
+                hasImage = true;
+                root.animate().alpha(1f).setDuration(500).start();
+            });
+        }
+    };
+
+    Wallpaper(MainActivity a) {
         this.a = a;
+        root = new FrameLayout(a);
+        root.setAlpha(0f);
+        root.setBackgroundColor(BG);
+
+        int artHeight = Math.round(a.getResources().getDisplayMetrics().heightPixels * ART_HEIGHT);
+        FrameLayout art = new FrameLayout(a);
+        root.addView(art, new FrameLayout.LayoutParams(MATCH, artHeight, Gravity.TOP));
+
+        for (int i = 0; i < 2; i++) {
+            ImageView iv = new ImageView(a);
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            iv.setAlpha(0f);
+            art.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
+            layers[i] = iv;
+        }
+
+        View dim = new View(a);
+        dim.setBackgroundColor(0x330A0D14);
+        art.addView(dim, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        View left = new View(a);
+        left.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0xF20A0D14, 0xA60A0D14, 0x1A0A0D14, 0x000A0D14}));
+        art.addView(left, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        View top = new View(a);
+        top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xD90A0D14, 0x660A0D14, 0x000A0D14}));
+        art.addView(top, new FrameLayout.LayoutParams(MATCH, Math.round(artHeight * 0.45f), Gravity.TOP));
+
+        View clockShade = new View(a);
+        GradientDrawable patch = new GradientDrawable();
+        patch.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        patch.setGradientCenter(0.88f, 0.12f);
+        patch.setGradientRadius(a.dp(340));
+        patch.setColors(new int[]{0xCC0A0D14, 0x660A0D14, 0x000A0D14});
+        clockShade.setBackground(patch);
+        art.addView(clockShade, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        View bottom = new View(a);
+        bottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x000A0D14, 0x990A0D14, BG}));
+        art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
+
+        // Title logo (or title text), top left under the tabs, where the weather used to be
+        titleBox = new LinearLayout(a);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleBox.setAlpha(0f);
+
+        logoView = new ImageView(a);
+        logoView.setAdjustViewBounds(true);
+        logoView.setScaleType(ImageView.ScaleType.FIT_START);
+        logoView.setMaxHeight(a.dp(LOGO_MAX_H_DP));
+        logoView.setMaxWidth(a.dp(LOGO_MAX_W_DP));
+        logoView.setVisibility(View.GONE);
+        titleBox.addView(logoView, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        titleText = new TextView(a);
+        titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+        titleText.setTextColor(TITLE_TEXT);
+        titleText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        titleText.setSingleLine(true);
+        titleText.setEllipsize(TextUtils.TruncateAt.END);
+        titleText.setMaxWidth(a.dp(520));
+        titleText.setIncludeFontPadding(false);
+        titleText.setShadowLayer(8f, 0f, 2f, 0xCC000000);
+        titleText.setVisibility(View.GONE);
+        titleBox.addView(titleText, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START);
+        tlp.setMargins(a.dp(42), a.dp(64), 0, 0);
+        root.addView(titleBox, tlp);
     }
 
-    void refreshIfDue() {
-        if (System.currentTimeMillis() - lastFetch >= EVERY_MS) fetch();
+    View view() {
+        return root;
     }
 
-    /** Clears the weather until fresh data arrives. */
-    void showPlaceholder() {
-        a.weatherView.setText("");
-        updateShown();
+    boolean isOn() {
+        return a.prefs.getBoolean("wallpaper_on", true);
     }
 
-    /** Shows the weather on the date line, unless there's nothing to show or the clock is in another time zone. */
-    void updateShown() {
-        JSONObject o = lastData;
-        boolean show = o != null && a.prefs.contains("wx_lat") && a.weatherView.length() > 0;
-        String clockTz = a.prefs.getString("clock_tz", null);
-        if (show && clockTz != null && !clockTz.equals(o.optString("timezone", ""))) show = false;
-        a.showWeather(show);
+    void setOn(boolean on) {
+        a.prefs.edit().putBoolean("wallpaper_on", on).apply();
+        update();
     }
 
-    // ---------- Weather location ----------
-
-    void askWeatherPlace() {
-        final EditText input = placeInput();
-        new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Weather location")
-                .setMessage("Weather data by Open-Meteo.com")
-                .setView(wrap(input))
-                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), false))
-                .setNeutralButton("Remove weather", (d, w) -> {
-                    a.prefs.edit().remove("wx_lat").remove("wx_lon").remove("wx_name").apply();
-                    lastFetch = 0;
-                    lastData = null;
-                    showPlaceholder();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+    void start() {
+        running = true;
+        update();
     }
 
-    // ---------- Clock time zone ----------
-
-    void askClockZone() {
-        final EditText input = placeInput();
-        String current = a.prefs.getString("clock_name", null);
-        String msg = "Showing: " + (a.prefs.contains("clock_tz") && current != null ? current : "Shield's time")
-                + "\n\nThis changes the clock on this screen only. The Shield's own time stays the same."
-                + " The weather is hidden while the clock shows a different time zone from the weather.";
-
-        new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Clock time zone")
-                .setMessage(msg)
-                .setView(wrap(input))
-                .setPositiveButton("Search", (d, w) -> searchPlace(input.getText().toString().trim(), true))
-                .setNeutralButton("Use Shield's time", (d, w) -> {
-                    a.prefs.edit().remove("clock_tz").remove("clock_name").apply();
-                    applyClockZone();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+    void stop() {
+        running = false;
+        a.handler.removeCallbacks(tick);
+        a.handler.removeCallbacks(followRun);
     }
 
-    /** Sets the clock to the chosen time zone. The city name isn't shown under the date. */
-    void applyClockZone() {
-        String tz = a.prefs.getString("clock_tz", null);
-        if (a.timeClock != null) a.timeClock.setTimeZone(tz);
-        if (a.dateClock != null) a.dateClock.setTimeZone(tz);
-        if (a.clockPlaceView != null) a.clockPlaceView.setVisibility(View.GONE);
-        updateShown();
+    void setShownOnPage(boolean ignored) {
+        if (a.page == lastPage) return;
+        lastPage = a.page;
+        if (a.page == MainActivity.PAGE_DISCOVER) {
+            pendingFollow = null;
+            followKey = null;
+        }
+        update();
+        if (rotating() && !items.isEmpty()) next();
     }
 
-    // ---------- Place search (shared by weather and clock) ----------
-
-    private EditText placeInput() {
-        EditText input = new EditText(a);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        input.setSingleLine(true);
-        input.setHint("Town or city");
-        return input;
+    void follow(Item it) {
+        if (it == null || it.backdrop == null || it.backdrop.isEmpty()) return;
+        pendingFollow = it;
+        a.handler.removeCallbacks(followRun);
+        a.handler.postDelayed(followRun, FOLLOW_DELAY_MS);
     }
 
-    private FrameLayout wrap(EditText input) {
-        FrameLayout box = new FrameLayout(a);
-        box.setPadding(a.dp(24), a.dp(8), a.dp(24), 0);
-        box.addView(input);
-        return box;
+    boolean isShowingPicture() {
+        return (rotating() && hasImage) || (following() && followKey != null);
     }
 
-    private void searchPlace(final String q, final boolean forClock) {
-        if (q.isEmpty()) return;
+    Item currentItem() {
+        return rotating() && hasImage ? shown : null;
+    }
+
+    private boolean rotating() {
+        return running && a.page == MainActivity.PAGE_HOME && isOn() && hasToken();
+    }
+
+    private boolean following() {
+        return running && a.page == MainActivity.PAGE_DISCOVER && hasToken();
+    }
+
+    private void update() {
+        a.handler.removeCallbacks(tick);
+
+        if (following()) {
+            titleBox.animate().alpha(0f).setDuration(300).start();
+            root.animate().alpha(followKey != null ? 1f : 0f).setDuration(400).start();
+            return;
+        }
+
+        if (!rotating()) {
+            a.handler.removeCallbacks(followRun);
+            root.animate().alpha(0f).setDuration(400).start();
+            return;
+        }
+
+        if (hasImage) root.animate().alpha(1f).setDuration(400).start();
+        if (items.isEmpty() || System.currentTimeMillis() - loadedAt > REFRESH_MS) load();
+        else if (!hasImage) next();
+        a.handler.postDelayed(tick, EVERY_MS);
+    }
+
+    private void load() {
+        if (loading) return;
+        loading = true;
         new Thread(() -> {
-            try {
-                String url = "https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name="
-                        + URLEncoder.encode(q, "UTF-8");
-                JSONObject o = new JSONObject(httpGet(url, null));
-                JSONArray res = o.optJSONArray("results");
-                final List<String> names = new ArrayList<>();
-                final List<String> shortNames = new ArrayList<>();
-                final List<double[]> coords = new ArrayList<>();
-                final List<String> zones = new ArrayList<>();
-                if (res != null) {
+            final List<Item> found = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            for (String[] s : SOURCES) {
+                try {
+                    JSONArray res = new JSONObject(tmdbGet(s[0])).getJSONArray("results");
                     for (int i = 0; i < res.length(); i++) {
-                        JSONObject r = res.getJSONObject(i);
-                        String name = str(r, "name");
-                        String admin = str(r, "admin1");
-                        String country = str(r, "country");
-                        StringBuilder sb = new StringBuilder(name);
-                        if (!admin.isEmpty()) sb.append(", ").append(admin);
-                        if (!country.isEmpty()) sb.append(", ").append(country);
-                        names.add(sb.toString());
-                        shortNames.add(name);
-                        coords.add(new double[]{r.getDouble("latitude"), r.getDouble("longitude")});
-                        zones.add(str(r, "timezone"));
+                        JSONObject raw = res.getJSONObject(i);
+                        if (!Languages.keep(raw)) continue;
+                        Item it = parseItem(raw, s[1]);
+                        if (it == null || it.backdrop.isEmpty() || !seen.add(it.key())) continue;
+                        Languages.remember(it, raw);
+                        found.add(it);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            Collections.shuffle(found);
+            a.runOnUiThread(() -> {
+                loading = false;
+                if (found.isEmpty()) return;
+                items.clear();
+                items.addAll(found);
+                loadedAt = System.currentTimeMillis();
+                index = -1;
+                if (rotating()) next();
+            });
+        }).start();
+    }
+
+    private void next() {
+        if (items.isEmpty()) return;
+        index = (index + 1) % items.size();
+        final Item it = items.get(index);
+        final int myIndex = index;
+        findLogo(it, logoPath -> a.images.fetchInto(TMDB_IMG + "w1280" + it.backdrop, b -> {
+            if (b == null || !rotating() || myIndex != index) return;
+            if (logoPath.isEmpty()) {
+                show(it, b, null);
+            } else {
+                a.images.fetchInto(TMDB_IMG + "w500" + logoPath, logo -> {
+                    if (rotating() && myIndex == index) show(it, b, logo);
+                });
+            }
+        }));
+    }
+
+    private void show(final Item it, Bitmap b, Bitmap logo) {
+        crossfade(b, FADE_MS);
+        shown = it;
+
+        // Very dark logos would vanish on the dark background, so they fall back to text
+        final Bitmap useLogo = (logo != null && !tooDark(logo)) ? logo : null;
+        titleBox.animate().alpha(0f).setDuration(400).withEndAction(() -> {
+            if (useLogo != null) {
+                logoView.setImageBitmap(useLogo);
+                logoView.setVisibility(View.VISIBLE);
+                titleText.setVisibility(View.GONE);
+            } else {
+                titleText.setText(it.title);
+                titleText.setVisibility(View.VISIBLE);
+                logoView.setVisibility(View.GONE);
+            }
+            if (rotating()) titleBox.animate().alpha(TITLE_ALPHA).setDuration(700).start();
+        }).start();
+
+        if (!hasImage) hasImage = true;
+        root.animate().alpha(1f).setDuration(600).start();
+    }
+
+    private void crossfade(Bitmap b, long ms) {
+        ImageView back = layers[1 - front];
+        ImageView old = layers[front];
+        back.setImageBitmap(b);
+        back.animate().alpha(1f).setDuration(ms).start();
+        old.animate().alpha(0f).setDuration(ms).start();
+        front = 1 - front;
+    }
+
+    // ---------- Title logos ----------
+
+    /** Finds the official title logo (PNG), as the screensaver does: English, then Hindi or Punjabi, then no language. */
+    private void findLogo(final Item it, final Done done) {
+        String cached = logoPaths.get(it.key());
+        if (cached != null) {
+            done.got(cached);
+            return;
+        }
+        new Thread(() -> {
+            String path = "";
+            try {
+                JSONObject o = new JSONObject(tmdbGet("/" + it.type + "/" + it.id
+                        + "/images?include_image_language=en,hi,pa,null"));
+                JSONArray logos = o.optJSONArray("logos");
+                if (logos != null) {
+                    for (int pass = 0; pass < 3 && path.isEmpty(); pass++) {
+                        for (int i = 0; i < logos.length(); i++) {
+                            JSONObject l = logos.getJSONObject(i);
+                            String lang = str(l, "iso_639_1");
+                            if ("null".equals(lang)) lang = "";
+                            String fp = str(l, "file_path");
+                            boolean langOk;
+                            if (pass == 0) langOk = "en".equals(lang);
+                            else if (pass == 1) langOk = "hi".equals(lang) || "pa".equals(lang);
+                            else langOk = lang.isEmpty();
+                            if (langOk && fp.toLowerCase().endsWith(".png")) {
+                                path = fp;
+                                break;
+                            }
+                        }
                     }
                 }
-                a.runOnUiThread(() -> {
-                    if (names.isEmpty()) {
-                        Toast.makeText(a, "No places found. Try another spelling.", Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                            .setTitle("Which one?")
-                            .setItems(names.toArray(new String[0]), (d, w) -> {
-                                if (forClock) {
-                                    String tz = zones.get(w);
-                                    if (tz.isEmpty()) {
-                                        Toast.makeText(a, "Couldn't find a time zone for that place.",
-                                                Toast.LENGTH_LONG).show();
-                                        return;
-                                    }
-                                    a.prefs.edit()
-                                            .putString("clock_tz", tz)
-                                            .putString("clock_name", shortNames.get(w))
-                                            .apply();
-                                    applyClockZone();
-                                } else {
-                                    a.prefs.edit()
-                                            .putFloat("wx_lat", (float) coords.get(w)[0])
-                                            .putFloat("wx_lon", (float) coords.get(w)[1])
-                                            .putString("wx_name", shortNames.get(w))
-                                            .apply();
-                                    lastData = null;
-                                    showPlaceholder();
-                                    fetch();
-                                }
-                            })
-                            .setNegativeButton("Cancel", null)
-                            .show();
-                });
-            } catch (Exception ex) {
-                a.runOnUiThread(() -> Toast.makeText(a,
-                        "Couldn't search right now. Check the internet connection.", Toast.LENGTH_LONG).show());
+            } catch (Exception ignored) {
             }
+            final String p = path;
+            a.runOnUiThread(() -> {
+                logoPaths.put(it.key(), p);
+                done.got(p);
+            });
         }).start();
     }
 
-    // ---------- Fetching the weather ----------
-
-    void fetch() {
-        if (!a.prefs.contains("wx_lat")) {
-            showPlaceholder();
-            return;
-        }
-        final float lat = a.prefs.getFloat("wx_lat", 0f);
-        final float lon = a.prefs.getFloat("wx_lon", 0f);
-        lastFetch = System.currentTimeMillis();
-        new Thread(() -> {
-            try {
-                String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
-                        + "&current=temperature_2m,apparent_temperature,weather_code,is_day"
-                        + "&hourly=temperature_2m,weather_code,precipitation_probability,is_day"
-                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-                        + "precipitation_probability_max,sunrise,sunset"
-                        + "&timezone=auto&forecast_days=7";
-                final JSONObject o = new JSONObject(httpGet(url, null));
-                JSONObject cur = o.getJSONObject("current");
-                final long now = Math.round(cur.getDouble("temperature_2m"));
-                final int code = cur.getInt("weather_code");
-                final boolean day = cur.optInt("is_day", 1) == 1;
-
-                a.runOnUiThread(() -> {
-                    lastData = o;
-                    a.weatherView.setText(symbol(code, day) + " " + now + DEG);
-                    updateShown();
-                });
-            } catch (Exception ex) {
-                lastFetch = 0; // try again on the next check
-            }
-        }).start();
-    }
-
-    // ---------- Forecast card ----------
-
-    /** Press OK on the weather: the full forecast. */
-    void openForecast() {
-        if (!a.prefs.contains("wx_lat")) {
-            askWeatherPlace();
-            return;
-        }
-        JSONObject o = lastData;
-        if (o == null) {
-            Toast.makeText(a, "Getting the forecast\u2026", Toast.LENGTH_SHORT).show();
-            fetch();
-            return;
-        }
+    /** True when the visible part of a logo is mostly black or very dark. */
+    private static boolean tooDark(Bitmap logo) {
         try {
-            showForecast(o);
+            int w = 48;
+            int h = Math.max(1, logo.getHeight() * w / Math.max(1, logo.getWidth()));
+            Bitmap small = Bitmap.createScaledBitmap(logo, w, h, true);
+            long sum = 0;
+            int n = 0;
+            for (int y = 0; y < small.getHeight(); y++) {
+                for (int x = 0; x < small.getWidth(); x++) {
+                    int c = small.getPixel(x, y);
+                    if (Color.alpha(c) < 128) continue;
+                    sum += (299L * Color.red(c) + 587L * Color.green(c) + 114L * Color.blue(c)) / 1000;
+                    n++;
+                }
+            }
+            if (small != logo) small.recycle();
+            return n > 0 && sum / n < 70;
         } catch (Exception e) {
-            Toast.makeText(a, "Couldn't show the forecast right now.", Toast.LENGTH_LONG).show();
+            return false;
         }
-    }
-
-    private void showForecast(JSONObject o) throws Exception {
-        JSONObject cur = o.getJSONObject("current");
-        JSONObject hourly = o.getJSONObject("hourly");
-        JSONObject daily = o.getJSONObject("daily");
-
-        LinearLayout box = new LinearLayout(a);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(a.dp(24), a.dp(4), a.dp(24), a.dp(8));
-
-        // Now
-        int code = cur.getInt("weather_code");
-        boolean day = cur.optInt("is_day", 1) == 1;
-        long temp = Math.round(cur.getDouble("temperature_2m"));
-        long feels = Math.round(cur.optDouble("apparent_temperature", temp));
-        text(box, symbol(code, day) + "  " + temp + DEG + "   " + describe(code), 22, true, 0xFFFFFFFF, 0);
-
-        // Today's details
-        String hi = Math.round(daily.getJSONArray("temperature_2m_max").getDouble(0)) + DEG;
-        String lo = Math.round(daily.getJSONArray("temperature_2m_min").getDouble(0)) + DEG;
-        int rain = daily.getJSONArray("precipitation_probability_max").optInt(0, 0);
-        String sunrise = timeOf(daily.getJSONArray("sunrise").optString(0, ""));
-        String sunset = timeOf(daily.getJSONArray("sunset").optString(0, ""));
-        text(box, "Feels like " + feels + DEG + GAP + "High " + hi + GAP + "Low " + lo + GAP + "Rain " + rain + "%",
-                14, false, SOFT_TEXT, 6);
-        text(box, "Sunrise " + sunrise + GAP + "Sunset " + sunset, 14, false, SOFT_TEXT, 2);
-
-        // Next 12 hours
-        text(box, "Next 12 hours", 15, true, 0xA0FFFFFF, 16);
-        JSONArray times = hourly.getJSONArray("time");
-        JSONArray temps = hourly.getJSONArray("temperature_2m");
-        JSONArray codes = hourly.getJSONArray("weather_code");
-        JSONArray rains = hourly.optJSONArray("precipitation_probability");
-        JSONArray days = hourly.optJSONArray("is_day");
-        String nowTime = str(cur, "time");
-        String nowHour = nowTime.length() >= 13 ? nowTime.substring(0, 13) : nowTime;
-        int start = 0;
-        for (int i = 0; i < times.length(); i++) {
-            if (times.getString(i).compareTo(nowHour) >= 0) {
-                start = i;
-                break;
-            }
-        }
-        LinearLayout hours = new LinearLayout(a);
-        hours.setOrientation(LinearLayout.HORIZONTAL);
-        hours.setPadding(0, a.dp(6), 0, 0);
-        for (int i = start; i < Math.min(start + 12, times.length()); i++) {
-            LinearLayout col = new LinearLayout(a);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setGravity(Gravity.CENTER_HORIZONTAL);
-            String label = i == start ? "Now" : timeOf(times.getString(i));
-            boolean isDay = days == null || days.optInt(i, 1) == 1;
-            int r = rains != null ? rains.optInt(i, 0) : 0;
-            text(col, label, 12, false, SOFT_TEXT, 0).setGravity(Gravity.CENTER);
-            text(col, symbol(codes.optInt(i, 0), isDay), 20, false, 0xFFFFFFFF, 2).setGravity(Gravity.CENTER);
-            text(col, Math.round(temps.optDouble(i, 0)) + DEG, 15, true, 0xFFFFFFFF, 2).setGravity(Gravity.CENTER);
-            text(col, r >= 20 ? r + "%" : " ", 12, false, RAIN_BLUE, 1).setGravity(Gravity.CENTER);
-            hours.addView(col, new LinearLayout.LayoutParams(a.dp(56), WRAP));
-        }
-        box.addView(hours, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        // Next 7 days
-        text(box, "Next 7 days", 15, true, 0xA0FFFFFF, 16);
-        JSONArray dTimes = daily.getJSONArray("time");
-        JSONArray dCodes = daily.getJSONArray("weather_code");
-        JSONArray dHi = daily.getJSONArray("temperature_2m_max");
-        JSONArray dLo = daily.getJSONArray("temperature_2m_min");
-        JSONArray dRain = daily.optJSONArray("precipitation_probability_max");
-        SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.UK);
-        SimpleDateFormat out = new SimpleDateFormat("EEE d", Locale.UK);
-        for (int i = 0; i < dTimes.length(); i++) {
-            LinearLayout row = new LinearLayout(a);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, a.dp(4), 0, 0);
-
-            String label;
-            if (i == 0) label = "Today";
-            else if (i == 1) label = "Tomorrow";
-            else {
-                Date d = in.parse(dTimes.getString(i));
-                label = d != null ? out.format(d) : dTimes.getString(i);
-            }
-            int dc = dCodes.optInt(i, 0);
-            int dr = dRain != null ? dRain.optInt(i, 0) : 0;
-
-            row.addView(make(label, 15, false, 0xFFFFFFFF), new LinearLayout.LayoutParams(a.dp(110), WRAP));
-            row.addView(make(symbol(dc, true), 18, false, 0xFFFFFFFF), new LinearLayout.LayoutParams(a.dp(40), WRAP));
-            row.addView(make(describe(dc), 14, false, SOFT_TEXT), new LinearLayout.LayoutParams(a.dp(170), WRAP));
-            row.addView(make(Math.round(dHi.optDouble(i, 0)) + DEG + " / " + Math.round(dLo.optDouble(i, 0)) + DEG,
-                    15, true, 0xFFFFFFFF), new LinearLayout.LayoutParams(a.dp(110), WRAP));
-            row.addView(make(dr >= 20 ? "Rain " + dr + "%" : "", 13, false, RAIN_BLUE),
-                    new LinearLayout.LayoutParams(WRAP, WRAP));
-            box.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
-        }
-
-        text(box, "Weather data by Open-Meteo.com", 12, false, 0x80FFFFFF, 16);
-
-        ScrollView sv = new ScrollView(a);
-        sv.setFocusable(true);
-        sv.addView(box);
-
-        AlertDialog dlg = new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(a.prefs.getString("wx_name", "Weather"))
-                .setView(sv)
-                .setPositiveButton("Close", null)
-                .create();
-        dlg.show();
-        if (dlg.getWindow() != null) dlg.getWindow().setLayout(a.dp(760), WRAP);
-    }
-
-    private TextView make(String s, int sp, boolean bold, int color) {
-        TextView t = new TextView(a);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(color);
-        t.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL));
-        t.setSingleLine(true);
-        t.setText(s);
-        return t;
-    }
-
-    private TextView text(LinearLayout parent, String s, int sp, boolean bold, int color, int topDp) {
-        TextView t = make(s, sp, bold, color);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.topMargin = a.dp(topDp);
-        parent.addView(t, lp);
-        return t;
-    }
-
-    /** "2026-10-24T19:00" becomes "19:00". */
-    private static String timeOf(String iso) {
-        return iso != null && iso.length() >= 16 ? iso.substring(11, 16) : "";
-    }
-
-    // ---------- Icons and descriptions ----------
-
-    private static String symbol(int c, boolean day) {
-        if (c == 0) return day ? "\u2600\uFE0F" : "\uD83C\uDF19";               // sun / moon
-        if (c == 1) return day ? "\uD83C\uDF24\uFE0F" : "\uD83C\uDF19";         // sun behind small cloud / moon
-        if (c == 2) return day ? "\u26C5" : "\u2601\uFE0F";                     // sun behind cloud / cloud
-        if (c == 3) return "\u2601\uFE0F";                                      // cloud
-        if (c == 45 || c == 48) return "\uD83C\uDF2B\uFE0F";                    // fog
-        if (c >= 51 && c <= 57) return "\uD83C\uDF26\uFE0F";                    // drizzle
-        if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return "\uD83C\uDF27\uFE0F"; // rain
-        if ((c >= 71 && c <= 77) || c == 85 || c == 86) return "\uD83C\uDF28\uFE0F";   // snow
-        if (c >= 95) return "\u26C8\uFE0F";                                     // thunder
-        return "\uD83C\uDF21\uFE0F";
-    }
-
-    private static String describe(int c) {
-        if (c == 0) return "Clear";
-        if (c == 1) return "Mostly clear";
-        if (c == 2) return "Partly cloudy";
-        if (c == 3) return "Cloudy";
-        if (c == 45 || c == 48) return "Fog";
-        if (c >= 51 && c <= 57) return "Drizzle";
-        if (c >= 61 && c <= 67) return "Rain";
-        if (c >= 71 && c <= 77) return "Snow";
-        if (c >= 80 && c <= 82) return "Showers";
-        if (c == 85 || c == 86) return "Snow showers";
-        if (c >= 95) return "Thunderstorms";
-        return "";
     }
 }
