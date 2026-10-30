@@ -16,7 +16,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -83,6 +82,7 @@ public class MainActivity extends Activity {
     WeatherClock weather;
     VpnStatus vpn;
     NetworkStatus network;
+    SettingsPanel settings;
     Menus menus;
     Wallpaper wallpaper;
 
@@ -99,6 +99,8 @@ public class MainActivity extends Activity {
     private TextView weatherSep;
     private FrameLayout cogBtn;
     private View dockBand;
+    private View moreInfo;
+    private boolean renderedHero = false;
     private TextView hintView;
     private TextView tabHome, tabDiscover, tabApps;
     private GradientDrawable baseBg, glow;
@@ -164,6 +166,7 @@ public class MainActivity extends Activity {
         weather = new WeatherClock(this);
         vpn = new VpnStatus(this);
         network = new NetworkStatus(this);
+        settings = new SettingsPanel(this);
         menus = new Menus(this);
         wallpaper = new Wallpaper(this);
         buildScreen();
@@ -424,7 +427,7 @@ public class MainActivity extends Activity {
         netBtn.addView(netDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
         network.setDot(netDot);
 
-        cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
+        cogBtn = roundButton(R.drawable.ic_cog, () -> settings.open());
         cogBtn.setId(View.generateViewId());
 
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(30), dp(30));
@@ -716,6 +719,7 @@ public class MainActivity extends Activity {
         idle = false;
         firstTile = null;
         dockBand = null;
+        moreInfo = null;
 
         hintView.setVisibility(movingPkg != null ? View.VISIBLE : View.GONE);
         metaView.setText("");
@@ -750,9 +754,20 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
-        // With the artwork on, the dock sits lower so the picture has the top half of the screen
-        if (wallpaper.heroOn()) {
-            content.addView(new View(this), new LinearLayout.LayoutParams(MATCH, dp(Wallpaper.HERO_GAP_DP)));
+        // With the artwork on, the dock sits lower so the picture has the top half of the screen,
+        // with the More info button just above the dock
+        renderedHero = wallpaper.heroOn();
+        if (renderedHero) {
+            FrameLayout hero = new FrameLayout(this);
+            hero.setClipChildren(false);
+            hero.setClipToPadding(false);
+            moreInfo = moreInfoButton();
+            FrameLayout.LayoutParams mlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START);
+            mlp.leftMargin = dp(10);
+            mlp.bottomMargin = dp(16);
+            hero.addView(moreInfo, mlp);
+            content.addView(hero, new LinearLayout.LayoutParams(MATCH, dp(Wallpaper.HERO_GAP_DP)));
+            heroChanged();
         }
 
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
@@ -789,6 +804,68 @@ public class MainActivity extends Activity {
         addGroupSection("Watch", Layout.WATCH);
         addGroupSection("Play", Layout.PLAY);
         addGroupSection("Tools", Layout.TOOLS);
+    }
+
+    /** The More info button: ⓘ icon and label, white when highlighted. Opens the info card. */
+    private View moreInfoButton() {
+        final LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.HORIZONTAL);
+        b.setGravity(Gravity.CENTER_VERTICAL);
+        b.setPadding(dp(14), dp(8), dp(18), dp(8));
+        b.setFocusable(true);
+        b.setClickable(true);
+        b.setPivotX(0f);
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(20));
+        bg.setColor(0x26FFFFFF);
+        b.setBackground(bg);
+
+        final Drawable icon = Icons.make(Icons.INFO, dp(18));
+        icon.setTint(0xFFFFFFFF);
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(icon);
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        ilp.rightMargin = dp(8);
+        b.addView(iv, ilp);
+
+        final TextView tv = new TextView(this);
+        style(tv, 15, false, 0xFFFFFFFF);
+        tv.setText("More info");
+        b.addView(tv, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        b.setOnFocusChangeListener((v, f) -> {
+            bg.setColor(f ? 0xFFFFFFFF : 0x26FFFFFF);
+            tv.setTextColor(f ? DARK : 0xFFFFFFFF);
+            icon.setTint(f ? DARK : 0xFFFFFFFF);
+            v.animate().scaleX(f ? 1.06f : 1f).scaleY(f ? 1.06f : 1f).setDuration(120).start();
+            if (f) {
+                topRowFocused();
+                handler.post(() -> scroll.smoothScrollTo(0, 0));
+            }
+        });
+        b.setOnClickListener(v -> {
+            Item it = wallpaper.currentItem();
+            if (it != null) discover.openInfo(it);
+        });
+        return b;
+    }
+
+    /** Shows the More info button only while there's a title on screen to open. */
+    void heroChanged() {
+        if (moreInfo == null) return;
+        boolean show = page == PAGE_HOME && wallpaper.currentItem() != null;
+        if (!show && moreInfo.hasFocus() && firstTile != null) firstTile.requestFocus();
+        moreInfo.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    /** The artwork has started or stopped loading altogether: move the dock down or up to match. */
+    void heroLayoutChanged() {
+        if (page != PAGE_HOME || movingPkg != null || content == null) return;
+        if (renderedHero == wallpaper.heroOn()) return;
+        View f = getCurrentFocus();
+        boolean inContent = f != null && isInside(f, content);
+        if (scroll != null) scroll.scrollTo(0, 0);
+        render(null, inContent);
     }
 
     /**
@@ -1163,41 +1240,7 @@ public class MainActivity extends Activity {
         if (f != null && allTiles.contains(f)) f.animate().scaleX(1.12f).scaleY(1.12f).setDuration(200).start();
     }
 
-    // ---------- Settings menu ----------
-
-    private void openSettingsMenu() {
-        final boolean wallpaperOn = wallpaper.isOn();
-        String[] opts = {
-                "Shield settings",
-                "Clock time zone",
-                "Weather location",
-                "Home wallpaper: " + (wallpaperOn ? "On" : "Off"),
-                "Backup and restore",
-                "About"};
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Settings")
-                .setItems(opts, (d, which) -> {
-                    if (which == 0) {
-                        startSafe(new Intent(Settings.ACTION_SETTINGS));
-                    } else if (which == 1) {
-                        weather.askClockZone();
-                    } else if (which == 2) {
-                        weather.askWeatherPlace();
-                    } else if (which == 3) {
-                        wallpaper.setOn(!wallpaperOn);
-                        // The dock moves up or down with the artwork
-                        if (page == PAGE_HOME) {
-                            if (scroll != null) scroll.scrollTo(0, 0);
-                            render(null);
-                        }
-                    } else if (which == 4) {
-                        new Backup(this).openMenu();
-                    } else if (which == 5) {
-                        new About(this).show();
-                    }
-                })
-                .show();
-    }
+    // ---------- After a restore ----------
 
     /** After a restore, reload everything from the restored settings. */
     void reloadAfterRestore() {
