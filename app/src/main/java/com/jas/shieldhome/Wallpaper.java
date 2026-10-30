@@ -36,12 +36,16 @@ import static com.jas.shieldhome.Ui.str;
 
 /**
  * Artwork behind the screen, Netflix style.
- * Home: recent films and series (see Latest.java) rotate every 30 seconds, following your languages,
- * with the title's official logo top left (or the title in text when there's no logo).
- * Play/Pause opens its info card.
+ * Home: recent films and series (see Latest.java) rotate every 30 seconds, following your languages.
+ * The artwork has the top half of the screen, with the title's official logo centred on the left
+ * (or the title in text). Scrolling down to Watch and below fades the artwork and title away.
+ * Play/Pause opens the info card while the artwork is showing.
  * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
  */
 final class Wallpaper {
+
+    /** How much lower the dock sits on Home while the artwork is on. */
+    static final int HERO_GAP_DP = 130;
 
     private static final long EVERY_MS = 30 * 1000L;
     private static final long REFRESH_MS = 3 * 60 * 60 * 1000L;
@@ -52,11 +56,16 @@ final class Wallpaper {
     private static final int BG = 0xFF0A0D14;
     private static final float ART_HEIGHT = 0.72f;
 
-    // The title logo: small and slightly faded, so it doesn't look like an advert
+    // The title: slightly faded, so it doesn't look like an advert
     private static final float TITLE_ALPHA = 0.85f;
-    private static final int LOGO_MAX_H_DP = 44;
-    private static final int LOGO_MAX_W_DP = 300;
+    private static final int LOGO_MAX_H_DP = 90;
+    private static final int LOGO_MAX_W_DP = 440;
     private static final int TITLE_TEXT = 0xE6F1F1F1;
+    // The title is centred in this band: from under the tabs to just above the dock
+    private static final int TITLE_TOP_DP = 64;
+    private static final int TITLE_AREA_DP = 240;
+    // How far the artwork and title drift up as they fade away
+    private static final int DRIFT_DP = 48;
 
     private interface Done {
         void got(String value);
@@ -64,7 +73,9 @@ final class Wallpaper {
 
     private final MainActivity a;
     private final FrameLayout root;
+    private final FrameLayout art;
     private final ImageView[] layers = new ImageView[2];
+    private final FrameLayout titleArea;
     private final LinearLayout titleBox;
     private final ImageView logoView;
     private final TextView titleText;
@@ -73,6 +84,10 @@ final class Wallpaper {
     private boolean hasImage = false;
     private boolean running = false;
     private int lastPage = MainActivity.PAGE_HOME;
+
+    // Scrolling on Home
+    private int scrollY = 0;
+    private boolean scrolledAway = false;
 
     // Home rotation
     private final List<Item> items = new ArrayList<>();
@@ -118,7 +133,7 @@ final class Wallpaper {
         root.setBackgroundColor(BG);
 
         int artHeight = Math.round(a.getResources().getDisplayMetrics().heightPixels * ART_HEIGHT);
-        FrameLayout art = new FrameLayout(a);
+        art = new FrameLayout(a);
         root.addView(art, new FrameLayout.LayoutParams(MATCH, artHeight, Gravity.TOP));
 
         for (int i = 0; i < 2; i++) {
@@ -157,7 +172,7 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // Title logo (or title text), top left under the tabs, where the weather used to be
+        // Title logo (or title text), centred on the left of the artwork
         titleBox = new LinearLayout(a);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setAlpha(0f);
@@ -171,20 +186,25 @@ final class Wallpaper {
         titleBox.addView(logoView, new LinearLayout.LayoutParams(WRAP, WRAP));
 
         titleText = new TextView(a);
-        titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+        titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 40);
         titleText.setTextColor(TITLE_TEXT);
         titleText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        titleText.setSingleLine(true);
+        titleText.setMaxLines(2);
         titleText.setEllipsize(TextUtils.TruncateAt.END);
         titleText.setMaxWidth(a.dp(520));
         titleText.setIncludeFontPadding(false);
+        titleText.setLineSpacing(0f, 1.05f);
         titleText.setShadowLayer(8f, 0f, 2f, 0xCC000000);
         titleText.setVisibility(View.GONE);
         titleBox.addView(titleText, new LinearLayout.LayoutParams(WRAP, WRAP));
 
-        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START);
-        tlp.setMargins(a.dp(42), a.dp(64), 0, 0);
-        root.addView(titleBox, tlp);
+        titleArea = new FrameLayout(a);
+        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL | Gravity.START);
+        tlp.leftMargin = a.dp(42);
+        titleArea.addView(titleBox, tlp);
+        FrameLayout.LayoutParams alp = new FrameLayout.LayoutParams(MATCH, a.dp(TITLE_AREA_DP), Gravity.TOP);
+        alp.topMargin = a.dp(TITLE_TOP_DP);
+        root.addView(titleArea, alp);
     }
 
     View view() {
@@ -193,6 +213,11 @@ final class Wallpaper {
 
     boolean isOn() {
         return a.prefs.getBoolean("wallpaper_on", true);
+    }
+
+    /** True when Home has the artwork at the top (so the dock sits lower). */
+    boolean heroOn() {
+        return isOn() && hasToken();
     }
 
     void setOn(boolean on) {
@@ -222,6 +247,12 @@ final class Wallpaper {
         if (rotating() && !items.isEmpty()) next();
     }
 
+    /** Called as the page scrolls: the artwork and title fade away as you go below the dock. */
+    void setScroll(int y) {
+        scrollY = y;
+        applyScroll();
+    }
+
     void follow(Item it) {
         if (it == null || it.backdrop == null || it.backdrop.isEmpty()) return;
         pendingFollow = it;
@@ -230,11 +261,11 @@ final class Wallpaper {
     }
 
     boolean isShowingPicture() {
-        return (rotating() && hasImage) || (following() && followKey != null);
+        return (rotating() && hasImage && !scrolledAway) || (following() && followKey != null);
     }
 
     Item currentItem() {
-        return rotating() && hasImage ? shown : null;
+        return rotating() && hasImage && !scrolledAway ? shown : null;
     }
 
     private boolean rotating() {
@@ -245,8 +276,31 @@ final class Wallpaper {
         return running && a.page == MainActivity.PAGE_DISCOVER && hasToken();
     }
 
+    /** 0 = on the dock (full artwork), 1 = scrolled past it (artwork gone). Always 0 off Home. */
+    private float progress() {
+        if (!rotating()) return 0f;
+        float p = scrollY / (float) a.dp(HERO_GAP_DP);
+        return Math.max(0f, Math.min(1f, p));
+    }
+
+    private void applyScroll() {
+        float p = progress();
+        float drift = -p * a.dp(DRIFT_DP);
+        art.setAlpha(1f - p);
+        art.setTranslationY(drift);
+        titleArea.setAlpha(1f - Math.min(1f, p * 2f));
+        titleArea.setTranslationY(drift);
+
+        boolean away = p >= 0.5f;
+        if (away != scrolledAway) {
+            scrolledAway = away;
+            a.refreshGlow();
+        }
+    }
+
     private void update() {
         a.handler.removeCallbacks(tick);
+        applyScroll();
 
         if (following()) {
             titleBox.animate().alpha(0f).setDuration(300).start();
@@ -335,7 +389,10 @@ final class Wallpaper {
             if (rotating()) titleBox.animate().alpha(TITLE_ALPHA).setDuration(700).start();
         }).start();
 
-        if (!hasImage) hasImage = true;
+        if (!hasImage) {
+            hasImage = true;
+            a.refreshGlow();
+        }
         root.animate().alpha(1f).setDuration(600).start();
     }
 
