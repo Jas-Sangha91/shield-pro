@@ -36,8 +36,9 @@ import static com.jas.shieldhome.Ui.str;
 
 /**
  * Artwork behind the screen, Netflix style.
- * Home: artwork rotates every 30 seconds (your languages plus big international hits), with the
- * title's official logo top left (or the title in text when there's no logo). Play/Pause opens its info card.
+ * Home: recent films and series (see Latest.java) rotate every 30 seconds, following your languages,
+ * with the title's official logo top left (or the title in text when there's no logo).
+ * Play/Pause opens its info card.
  * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
  */
 final class Wallpaper {
@@ -56,14 +57,6 @@ final class Wallpaper {
     private static final int LOGO_MAX_H_DP = 44;
     private static final int LOGO_MAX_W_DP = 300;
     private static final int TITLE_TEXT = 0xE6F1F1F1;
-
-    // Where Home artwork comes from: {request, type}
-    private static final String[][] SOURCES = {
-            {"/trending/all/week?language=en-US&page=1", null},
-            {"/trending/all/week?language=en-US&page=2", null},
-            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=20", "movie"},
-            {"/discover/tv?language=en-US&sort_by=popularity.desc&with_original_language=hi&vote_count.gte=10", "tv"},
-            {"/discover/movie?language=en-US&sort_by=popularity.desc&with_original_language=pa&vote_count.gte=3", "movie"}};
 
     private interface Done {
         void got(String value);
@@ -279,7 +272,7 @@ final class Wallpaper {
         new Thread(() -> {
             final List<Item> found = new ArrayList<>();
             Set<String> seen = new HashSet<>();
-            for (String[] s : SOURCES) {
+            for (String[] s : Latest.sources()) {
                 try {
                     JSONArray res = new JSONObject(tmdbGet(s[0])).getJSONArray("results");
                     for (int i = 0; i < res.length(); i++) {
