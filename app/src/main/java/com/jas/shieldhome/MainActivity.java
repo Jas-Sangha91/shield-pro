@@ -82,14 +82,16 @@ public class MainActivity extends Activity {
     Wallpaper wallpaper;
 
     LinearLayout content;
-    TextView titleView, metaView, weatherView, placeView, vpnCityView, clockPlaceView;
+    LinearLayout weatherRow;
+    TextView titleView, metaView, weatherView, vpnCityView, clockPlaceView;
     TextClock timeClock, dateClock;
     GradientDrawable vpnDotBg;
     int page = PAGE_HOME;
 
     // Screen state
     private ScrollView scroll;
-    private LinearLayout weatherRow;
+    private TextView weatherSep;
+    private FrameLayout cogBtn;
     private TextView hintView;
     private TextView tabHome, tabDiscover, tabApps;
     private GradientDrawable baseBg, glow;
@@ -322,7 +324,7 @@ public class MainActivity extends Activity {
         header.setClipToPadding(false);
         column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
 
-        // Top left: search, tabs, then weather (Home only)
+        // Top left: search and tabs
         LinearLayout topLeft = new LinearLayout(this);
         topLeft.setOrientation(LinearLayout.VERTICAL);
         topLeft.setClipChildren(false);
@@ -346,33 +348,6 @@ public class MainActivity extends Activity {
         tabs.addView(tabDiscover, tlp2);
         tabs.addView(tabApps, new LinearLayout.LayoutParams(WRAP, WRAP));
         topLeft.addView(tabs, new LinearLayout.LayoutParams(WRAP, WRAP));
-
-        // Weather: one line; highlight it and press OK for the full forecast
-        weatherRow = new LinearLayout(this);
-        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
-        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
-        weatherRow.setPadding(dp(8), dp(4), dp(12), dp(4));
-        final GradientDrawable weatherBg = new GradientDrawable();
-        weatherBg.setCornerRadius(dp(14));
-        weatherBg.setColor(0x00000000);
-        weatherRow.setBackground(weatherBg);
-        weatherRow.setFocusable(true);
-        weatherRow.setClickable(true);
-        weatherRow.setOnFocusChangeListener((v, f) -> {
-            weatherBg.setColor(f ? 0x33FFFFFF : 0x00000000);
-            if (f) topRowFocused();
-        });
-        weatherRow.setOnClickListener(v -> weather.openForecast());
-        weatherView = new TextView(this);
-        style(weatherView, 18, false, 0xFFFFFFFF);
-        placeView = new TextView(this);
-        style(placeView, 16, false, SOFT_TEXT);
-        placeView.setPadding(dp(10), 0, 0, 0);
-        weatherRow.addView(weatherView, new LinearLayout.LayoutParams(WRAP, WRAP));
-        weatherRow.addView(placeView, new LinearLayout.LayoutParams(WRAP, WRAP));
-        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        wlp.topMargin = dp(6);
-        topLeft.addView(weatherRow, wlp);
 
         header.addView(topLeft, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START));
 
@@ -426,7 +401,8 @@ public class MainActivity extends Activity {
         vpnDot.setBackground(vpnDotBg);
         vpnBtn.addView(vpnDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
 
-        FrameLayout cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
+        cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
+        cogBtn.setId(View.generateViewId());
 
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(30), dp(30));
         blp.topMargin = dp(8);
@@ -440,6 +416,7 @@ public class MainActivity extends Activity {
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
         clock.setGravity(Gravity.END);
+        clock.setClipChildren(false);
         timeClock = new TextClock(this);
         timeClock.setFormat12Hour("HH:mm");
         timeClock.setFormat24Hour("HH:mm");
@@ -452,16 +429,58 @@ public class MainActivity extends Activity {
         dateClock.setFormat12Hour("EEEE d MMMM");
         dateClock.setFormat24Hour("EEEE d MMMM");
         style(dateClock, 18, false, SOFT_TEXT);
-        dateClock.setGravity(Gravity.END);
-        dateClock.setPadding(0, dp(4), 0, 0);
         clockPlaceView = new TextView(this);
         style(clockPlaceView, 14, false, SOFT_TEXT);
         clockPlaceView.setGravity(Gravity.END);
         clockPlaceView.setSingleLine(true);
         clockPlaceView.setPadding(0, dp(2), 0, 0);
         clockPlaceView.setVisibility(View.GONE);
+
+        // Date line: the date, then the weather.
+        // Highlight the weather (right from the cog) and press OK for the full forecast.
+        LinearLayout dateRow = new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        dateRow.setClipChildren(false);
+        dateRow.setClipToPadding(false);
+        dateRow.addView(dateClock, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        weatherSep = new TextView(this);
+        style(weatherSep, 18, false, SOFT_TEXT);
+        weatherSep.setText("  \u00B7");
+        dateRow.addView(weatherSep, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        weatherRow = new LinearLayout(this);
+        weatherRow.setId(View.generateViewId());
+        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
+        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
+        weatherRow.setPadding(dp(8), dp(2), dp(8), dp(2));
+        final GradientDrawable weatherBg = new GradientDrawable();
+        weatherBg.setCornerRadius(dp(14));
+        weatherBg.setColor(0x00000000);
+        weatherRow.setBackground(weatherBg);
+        weatherRow.setFocusable(true);
+        weatherRow.setClickable(true);
+        weatherRow.setOnFocusChangeListener((v, f) -> {
+            weatherBg.setColor(f ? 0x33FFFFFF : 0x00000000);
+            if (f) topRowFocused();
+        });
+        weatherRow.setOnClickListener(v -> weather.openForecast());
+        weatherView = new TextView(this);
+        style(weatherView, 18, false, SOFT_TEXT);
+        weatherView.setSingleLine(true);
+        weatherRow.addView(weatherView, new LinearLayout.LayoutParams(WRAP, WRAP));
+        // The negative margin lines the temperature up with the right edge of the clock
+        LinearLayout.LayoutParams wrlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        wrlp.rightMargin = -dp(8);
+        dateRow.addView(weatherRow, wrlp);
+        weatherRow.setNextFocusLeftId(cogBtn.getId());
+        weatherRow.setNextFocusUpId(cogBtn.getId());
+
         clock.addView(timeClock, new LinearLayout.LayoutParams(WRAP, WRAP));
-        clock.addView(dateClock, new LinearLayout.LayoutParams(WRAP, WRAP));
+        LinearLayout.LayoutParams drlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        drlp.topMargin = dp(2);
+        clock.addView(dateRow, drlp);
         clock.addView(clockPlaceView, new LinearLayout.LayoutParams(WRAP, WRAP));
         right.addView(clock, new LinearLayout.LayoutParams(WRAP, WRAP));
 
@@ -485,6 +504,16 @@ public class MainActivity extends Activity {
         styleTabs();
         weather.showPlaceholder();
         weather.applyClockZone();
+    }
+
+    /** Shows or hides the weather on the date line. WeatherClock decides when. */
+    void showWeather(boolean on) {
+        if (weatherRow == null) return;
+        if (!on && weatherRow.hasFocus() && cogBtn != null) cogBtn.requestFocus();
+        int vis = on ? View.VISIBLE : View.GONE;
+        weatherSep.setVisibility(vis);
+        weatherRow.setVisibility(vis);
+        if (cogBtn != null) cogBtn.setNextFocusRightId(on ? weatherRow.getId() : View.NO_ID);
     }
 
     private TextView makeTab(final String label, final int target) {
@@ -546,7 +575,7 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** The top row (search, tabs, weather, VPN, cog) leaves the big title blank. */
+    /** The top row (search, tabs, VPN, cog, weather) leaves the big title blank. */
     private void topRowFocused() {
         titleView.setText(" ");
         metaView.setText("");
@@ -653,11 +682,7 @@ public class MainActivity extends Activity {
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
 
-        // Weather and wallpaper on Home only (the weather can only be selected on Home)
-        if (weatherRow != null) {
-            weatherRow.animate().alpha(page == PAGE_HOME ? 1f : 0f).setDuration(250).start();
-            weatherRow.setFocusable(page == PAGE_HOME);
-        }
+        // Wallpaper on Home only (the weather now shows on every page)
         wallpaper.setShownOnPage(page == PAGE_HOME);
 
         if (page == PAGE_DISCOVER) {
