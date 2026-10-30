@@ -22,6 +22,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
@@ -92,10 +93,12 @@ public class MainActivity extends Activity {
     private ScrollView scroll;
     private TextView weatherSep;
     private FrameLayout cogBtn;
+    private View dockBand;
     private TextView hintView;
     private TextView tabHome, tabDiscover, tabApps;
     private GradientDrawable baseBg, glow;
     private int glowColor = 0x00000000;
+    private int glowBase = NEUTRAL_GLOW;
     private ValueAnimator glowAnim;
     private final Map<String, View> tileByPkg = new HashMap<>();
     private final Map<String, Integer> colorByPkg = new HashMap<>();
@@ -491,6 +494,8 @@ public class MainActivity extends Activity {
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setVerticalFadingEdgeEnabled(true);
         scroll.setFadingEdgeLength(dp(28));
+        // On Home, the artwork fades away as you scroll below the dock
+        scroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> wallpaper.setScroll(y));
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -583,6 +588,7 @@ public class MainActivity extends Activity {
     }
 
     void setGlow(int color) {
+        glowBase = color;
         // Much softer over the wallpaper, so the artwork keeps its own colours
         int strength = (wallpaper != null && wallpaper.isShowingPicture()) ? 0x1F000000 : 0x55000000;
         int target = (color & 0x00FFFFFF) | strength;
@@ -594,6 +600,11 @@ public class MainActivity extends Activity {
             glow.setColors(new int[]{glowColor, glowColor & 0x00FFFFFF});
         });
         glowAnim.start();
+    }
+
+    /** Re-applies the glow when the artwork appears or fades away (soft over artwork, full without). */
+    void refreshGlow() {
+        if (glow != null) setGlow(glowBase);
     }
 
     private int colorFor(String pkg) {
@@ -677,10 +688,12 @@ public class MainActivity extends Activity {
         baseAlpha.clear();
         idle = false;
         firstTile = null;
+        dockBand = null;
 
         hintView.setVisibility(movingPkg != null ? View.VISIBLE : View.GONE);
         metaView.setText("");
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
+        if (page == PAGE_HOME) titleView.setText(" ");
 
         // Wallpaper on Home only (the weather now shows on every page)
         wallpaper.setShownOnPage(page == PAGE_HOME);
@@ -701,6 +714,11 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
+        // With the artwork on, the dock sits lower so the picture has the top half of the screen
+        if (wallpaper.heroOn()) {
+            content.addView(new View(this), new LinearLayout.LayoutParams(MATCH, dp(Wallpaper.HERO_GAP_DP)));
+        }
+
         // Dock (tiles shrink a little if there are lots of apps, so it always fits)
         if (!layout.dock.isEmpty()) {
             LinearLayout band = new LinearLayout(this);
@@ -713,6 +731,7 @@ public class MainActivity extends Activity {
             bg.setColor(0x1FFFFFFF);
             bg.setCornerRadius(dp(24));
             band.setBackground(bg);
+            dockBand = band;
 
             int avail = getResources().getConfiguration().screenWidthDp - 64 - 24;
             int w = Math.min(DOCK_W, avail / layout.dock.size() - 2 * DOCK_GAP);
@@ -734,6 +753,27 @@ public class MainActivity extends Activity {
         addGroupSection("Watch", Layout.WATCH);
         addGroupSection("Play", Layout.PLAY);
         addGroupSection("Tools", Layout.TOOLS);
+    }
+
+    /**
+     * On Home with the artwork on: the dock shows the full artwork (scrolled to the top), and
+     * anything below slides the page up past the artwork, so it fades away.
+     */
+    private void homeTileFocused(View v) {
+        if (page != PAGE_HOME || !wallpaper.heroOn() || !isInside(v, content)) return;
+        final boolean inDock = dockBand != null && v.getParent() == dockBand;
+        handler.post(() -> {
+            int gap = dp(Wallpaper.HERO_GAP_DP);
+            if (inDock) scroll.smoothScrollTo(0, 0);
+            else if (scroll.getScrollY() < gap) scroll.smoothScrollTo(0, gap);
+        });
+    }
+
+    private static boolean isInside(View v, View parent) {
+        for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
+            if (p == parent) return true;
+        }
+        return false;
     }
 
     private void addGroupSection(String title, String group) {
@@ -1001,8 +1041,10 @@ public class MainActivity extends Activity {
                     .setDuration(150).start();
             ((FrameLayout) v).setForeground(hasFocus ? ring : null);
             if (hasFocus) {
-                if (titleView != null) titleView.setText(label);
+                // On Home the tiles show their own names, so the big title stays blank
+                if (titleView != null && page != PAGE_HOME) titleView.setText(label);
                 setGlow(colorPkg != null ? colorFor(colorPkg) : NEUTRAL_GLOW);
+                homeTileFocused(v);
             }
         });
         t.setOnClickListener(v -> onClick.run());
@@ -1107,6 +1149,11 @@ public class MainActivity extends Activity {
                         weather.askWeatherPlace();
                     } else if (which == 3) {
                         wallpaper.setOn(!wallpaperOn);
+                        // The dock moves up or down with the artwork
+                        if (page == PAGE_HOME) {
+                            if (scroll != null) scroll.scrollTo(0, 0);
+                            render(null);
+                        }
                     } else if (which == 4) {
                         new Backup(this).openMenu();
                     } else if (which == 5) {
