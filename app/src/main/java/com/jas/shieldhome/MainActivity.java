@@ -67,6 +67,9 @@ public class MainActivity extends Activity {
 
     static final int PAGE_HOME = 0, PAGE_DISCOVER = 1, PAGE_APPS = 2;
     private static final long IDLE_AFTER_MS = 20 * 1000L;
+    // Header height: full on Discover and Apps (room for the big title), shorter on Home
+    private static final int HEADER_DP = 176;
+    private static final int HEADER_HOME_DP = 96;
 
     // Shared with the other parts of the app
     PackageManager pm;
@@ -91,6 +94,7 @@ public class MainActivity extends Activity {
 
     // Screen state
     private ScrollView scroll;
+    private FrameLayout header;
     private TextView weatherSep;
     private FrameLayout cogBtn;
     private View dockBand;
@@ -321,11 +325,11 @@ public class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         root.addView(column, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        FrameLayout header = new FrameLayout(this);
+        header = new FrameLayout(this);
         header.setPadding(dp(40), dp(22), dp(48), dp(4));
         header.setClipChildren(false);
         header.setClipToPadding(false);
-        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(176)));
+        column.addView(header, new LinearLayout.LayoutParams(MATCH, dp(HEADER_DP)));
 
         // Top left: search and tabs
         LinearLayout topLeft = new LinearLayout(this);
@@ -695,7 +699,16 @@ public class MainActivity extends Activity {
         metaView.setVisibility(page == PAGE_HOME ? View.GONE : View.VISIBLE);
         if (page == PAGE_HOME) titleView.setText(" ");
 
-        // Wallpaper on Home only (the weather now shows on every page)
+        // On Home the big title is never used, so the header is shorter and the apps get the space
+        boolean home = page == PAGE_HOME;
+        titleView.setVisibility(home ? View.GONE : View.VISIBLE);
+        int headerH = dp(home ? HEADER_HOME_DP : HEADER_DP);
+        if (header.getLayoutParams().height != headerH) {
+            header.getLayoutParams().height = headerH;
+            header.requestLayout();
+        }
+
+        // Wallpaper on Home only (the weather shows on every page)
         wallpaper.setShownOnPage(page == PAGE_HOME);
 
         if (page == PAGE_DISCOVER) {
