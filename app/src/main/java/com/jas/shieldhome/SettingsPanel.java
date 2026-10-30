@@ -1,7 +1,10 @@
 package com.jas.shieldhome;
 
+import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.provider.Settings;
@@ -27,6 +30,8 @@ import static com.jas.shieldhome.Ui.WRAP;
 /**
  * Cog → the settings panel: a dark panel that slides in from the right, with icons,
  * current values and grouped sections. Back closes it.
+ * The screensaver switch needs a one-time permission, granted from the Mac:
+ * adb shell pm grant com.jas.shieldhome android.permission.WRITE_SECURE_SETTINGS
  */
 final class SettingsPanel {
 
@@ -35,10 +40,25 @@ final class SettingsPanel {
     private static final int ICON = 0xCCFFFFFF;
     private static final int SUB = 0x8CFFFFFF;
     private static final int SUB_FOCUSED = 0xFF4A4F58;
+    private static final int SWITCH_ON = 0xFF5DCAA5;
+    private static final int SWITCH_OFF = 0x4DFFFFFF;
     private static final String BACKUP_FILE = "sangha-home-backup.json";
+    private static final String BACKDROP = "com.google.android.backdrop/.Backdrop";
+    private static final String GRANT_COMMAND =
+            "adb shell pm grant com.jas.shieldhome android.permission.WRITE_SECURE_SETTINGS";
 
     private final MainActivity a;
     private Dialog dialog;
+
+    /** One row: the row itself and its subtitle (so it can be updated in place). */
+    private static final class Row {
+        LinearLayout view;
+        TextView sub;
+    }
+
+    // The screensaver switch
+    private GradientDrawable switchTrack;
+    private View switchKnob;
 
     SettingsPanel(MainActivity a) {
         this.a = a;
@@ -74,7 +94,7 @@ final class SettingsPanel {
         panel.addView(sv, new LinearLayout.LayoutParams(MATCH, 0, 1f));
 
         section(list, "Sangha Home");
-        final View first = row(list, Icons.SUN, "Weather location", "Shown under the clock", weatherValue(), false,
+        final Row first = row(list, Icons.SUN, "Weather location", "Shown under the clock", weatherValue(), false,
                 () -> {
                     close();
                     a.weather.askWeatherPlace();
@@ -86,10 +106,7 @@ final class SettingsPanel {
                 });
 
         section(list, "Screensaver");
-        boolean ours = screensaverIsOurs();
-        row(list, Icons.ARTWORK, "Screensaver",
-                ours ? "Artwork with title logos" : "OK to choose Sangha Home artwork",
-                ours ? "Sangha Home" : "Other", true, this::openScreensaver);
+        screensaverRow(list);
 
         section(list, "Backup");
         row(list, Icons.BACKUP, "Backup and restore", backupSubtitle(), null, true,
@@ -124,7 +141,7 @@ final class SettingsPanel {
         root.animate().alpha(1f).setDuration(180).start();
         panel.setTranslationX(a.dp(PANEL_W_DP));
         panel.animate().translationX(0f).setDuration(220).start();
-        first.post(first::requestFocus);
+        first.view.post(first.view::requestFocus);
     }
 
     private void close() {
@@ -145,8 +162,8 @@ final class SettingsPanel {
         list.addView(s, lp);
     }
 
-    private View row(LinearLayout list, int iconKind, String title, String subtitle, String value,
-                     boolean chevron, final Runnable onClick) {
+    private Row row(LinearLayout list, int iconKind, String title, String subtitle, String value,
+                    boolean chevron, final Runnable onClick) {
         final LinearLayout r = new LinearLayout(a);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -219,7 +236,70 @@ final class SettingsPanel {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.topMargin = a.dp(2);
         list.addView(r, lp);
-        return r;
+
+        Row row = new Row();
+        row.view = r;
+        row.sub = sub;
+        return row;
+    }
+
+    // ---------- Screensaver switch ----------
+
+    private void screensaverRow(LinearLayout list) {
+        final Row[] holder = new Row[1];
+        holder[0] = row(list, Icons.ARTWORK, "Sangha Home screensaver", screensaverSubtitle(), null, false,
+                () -> toggleScreensaver(holder[0]));
+
+        // The switch on the right of the row
+        FrameLayout sw = new FrameLayout(a);
+        switchTrack = new GradientDrawable();
+        switchTrack.setCornerRadius(a.dp(11));
+        sw.setBackground(switchTrack);
+        switchKnob = new View(a);
+        GradientDrawable knob = new GradientDrawable();
+        knob.setShape(GradientDrawable.OVAL);
+        knob.setColor(0xFFFFFFFF);
+        switchKnob.setBackground(knob);
+        sw.addView(switchKnob, new FrameLayout.LayoutParams(a.dp(16), a.dp(16), Gravity.CENTER_VERTICAL | Gravity.START));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(a.dp(40), a.dp(22));
+        slp.leftMargin = a.dp(12);
+        holder[0].view.addView(sw, slp);
+        showSwitch(screensaverIsOurs());
+    }
+
+    private void showSwitch(boolean on) {
+        if (switchTrack == null || switchKnob == null) return;
+        switchTrack.setColor(on ? SWITCH_ON : SWITCH_OFF);
+        FrameLayout.LayoutParams klp = (FrameLayout.LayoutParams) switchKnob.getLayoutParams();
+        klp.gravity = Gravity.CENTER_VERTICAL | (on ? Gravity.END : Gravity.START);
+        klp.leftMargin = a.dp(3);
+        klp.rightMargin = a.dp(3);
+        switchKnob.setLayoutParams(klp);
+    }
+
+    private void toggleScreensaver(Row row) {
+        if (a.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != PackageManager.PERMISSION_GRANTED) {
+            new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("One-time setup needed")
+                    .setMessage("To switch the screensaver from here, Sangha Home needs permission to change "
+                            + "system settings. Run this once from the Mac (in the platform-tools folder):\n\n"
+                            + "./" + GRANT_COMMAND
+                            + "\n\nUntil then, choose it in Shield settings → Device Preferences → Screen saver.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+        boolean turnOn = !screensaverIsOurs();
+        try {
+            ContentResolver cr = a.getContentResolver();
+            String comp = turnOn ? a.getPackageName() + "/.ArtworkDream" : BACKDROP;
+            Settings.Secure.putString(cr, "screensaver_components", comp);
+            Settings.Secure.putInt(cr, "screensaver_enabled", 1);
+        } catch (Exception e) {
+            return;
+        }
+        showSwitch(screensaverIsOurs());
+        if (row.sub != null) row.sub.setText(screensaverSubtitle());
     }
 
     // ---------- Current values ----------
@@ -232,20 +312,24 @@ final class SettingsPanel {
         return a.prefs.contains("clock_tz") ? a.prefs.getString("clock_name", "Custom") : "Shield's time";
     }
 
-    private boolean screensaverIsOurs() {
+    private String currentScreensaver() {
         try {
             String c = Settings.Secure.getString(a.getContentResolver(), "screensaver_components");
-            return c != null && c.contains(a.getPackageName());
+            return c == null ? "" : c;
         } catch (Exception e) {
-            return false;
+            return "";
         }
     }
 
-    private void openScreensaver() {
-        close();
-        Intent i = new Intent(Settings.ACTION_DREAM_SETTINGS);
-        if (i.resolveActivity(a.pm) == null) i = new Intent(Settings.ACTION_SETTINGS);
-        a.startSafe(i);
+    private boolean screensaverIsOurs() {
+        return currentScreensaver().contains(a.getPackageName());
+    }
+
+    private String screensaverSubtitle() {
+        String c = currentScreensaver();
+        if (c.contains(a.getPackageName())) return "On: artwork with title logos";
+        if (c.contains("com.google.android.backdrop")) return "Off: using Google's Backdrop";
+        return "Off: using another screensaver";
     }
 
     private String backupSubtitle() {
