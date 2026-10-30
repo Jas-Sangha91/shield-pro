@@ -40,7 +40,7 @@ import static com.jas.shieldhome.Ui.str;
  * Artwork behind the screen, Netflix style.
  * Home: recent films and series (see Latest.java) rotate every 30 seconds, following your languages.
  * The artwork has the top half of the screen. On the left: the title's official logo (or the title in
- * bold text), a details line and a short description, with a More info button (in MainActivity) below.
+ * bold text), a details line, a short description and a small More info button.
  * Scrolling down to Watch and below fades it all away. If no artwork can be loaded at all, the dock
  * moves up until it can (tried again every 30 seconds).
  * Discover: the artwork follows whichever poster is highlighted. Apps: plain background.
@@ -67,9 +67,9 @@ final class Wallpaper {
     private static final int TITLE_TEXT = 0xF2F1F1F1;
     private static final int DETAILS_TEXT = 0xD9F1F1F1;
     private static final int OVERVIEW_TEXT = 0xA6F1F1F1;
-    // The title block is centred in this band: from under the tabs to just above the More info button
+    // The title block is centred in this band: from under the tabs to just above the dock
     private static final int TITLE_TOP_DP = 64;
-    private static final int TITLE_AREA_DP = 200;
+    private static final int TITLE_AREA_DP = 236;
     // How far the artwork and title drift up as they fade away
     private static final int DRIFT_DP = 48;
 
@@ -87,6 +87,7 @@ final class Wallpaper {
     private final TextView titleText;
     private final TextView detailsText;
     private final TextView overviewText;
+    private final View moreInfo;
     private final Map<String, String> logoPaths = new HashMap<>();
     private int front = 0;
     private boolean hasImage = false;
@@ -140,6 +141,7 @@ final class Wallpaper {
         root = new FrameLayout(a);
         root.setAlpha(0f);
         root.setBackgroundColor(BG);
+        root.setClipChildren(false);
 
         int artHeight = Math.round(a.getResources().getDisplayMetrics().heightPixels * ART_HEIGHT);
         art = new FrameLayout(a);
@@ -181,10 +183,12 @@ final class Wallpaper {
                 new int[]{0x000A0D14, 0x990A0D14, BG}));
         art.addView(bottom, new FrameLayout.LayoutParams(MATCH, artHeight / 2, Gravity.BOTTOM));
 
-        // Title block, centred on the left of the artwork: logo or title, details, description
+        // Title block, centred on the left of the artwork: logo or title, details, description, More info
         titleBox = new LinearLayout(a);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setAlpha(0f);
+        titleBox.setClipChildren(false);
+        titleBox.setClipToPadding(false);
 
         logoView = new ImageView(a);
         logoView.setAdjustViewBounds(true);
@@ -233,7 +237,16 @@ final class Wallpaper {
         olp.topMargin = a.dp(6);
         titleBox.addView(overviewText, olp);
 
+        // Small More info button underneath the description (built in MainActivity, which handles focus)
+        moreInfo = a.moreInfoButton();
+        moreInfo.setVisibility(View.INVISIBLE);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        mlp.topMargin = a.dp(14);
+        titleBox.addView(moreInfo, mlp);
+
         titleArea = new FrameLayout(a);
+        titleArea.setClipChildren(false);
+        titleArea.setClipToPadding(false);
         FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL | Gravity.START);
         tlp.leftMargin = a.dp(42);
         titleArea.addView(titleBox, tlp);
@@ -244,6 +257,11 @@ final class Wallpaper {
 
     View view() {
         return root;
+    }
+
+    /** The More info button (MainActivity shows or hides it). */
+    View moreInfo() {
+        return moreInfo;
     }
 
     /** The wallpaper is always on now (the switch was removed). Kept so older code still builds. */
