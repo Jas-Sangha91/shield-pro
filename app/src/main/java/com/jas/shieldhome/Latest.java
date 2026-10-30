@@ -5,7 +5,7 @@ import java.util.Calendar;
 import java.util.Locale;
 
 /**
- * Where the Home wallpaper and the screensaver get their artwork: recent films and series only.
+ * Where the Home wallpaper gets its artwork: recent films and series only.
  * Each entry is {TMDB request, type}. The dates are worked out fresh every time the artwork reloads.
  */
 final class Latest {
