@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
     SearchScreen search;
     WeatherClock weather;
     VpnStatus vpn;
+    NetworkStatus network;
     Menus menus;
     Wallpaper wallpaper;
 
@@ -162,6 +163,7 @@ public class MainActivity extends Activity {
         search = new SearchScreen(this);
         weather = new WeatherClock(this);
         vpn = new VpnStatus(this);
+        network = new NetworkStatus(this);
         menus = new Menus(this);
         wallpaper = new Wallpaper(this);
         buildScreen();
@@ -178,6 +180,7 @@ public class MainActivity extends Activity {
         vpn.register();
         handler.removeCallbacks(vpnTick);
         handler.post(vpnTick);
+        network.register();
         discover.stopTicker();
         if (page == PAGE_DISCOVER) discover.startTicker();
         wallpaper.start();
@@ -194,6 +197,7 @@ public class MainActivity extends Activity {
         discover.stopTicker();
         wallpaper.stop();
         vpn.unregister();
+        network.unregister();
         unregisterPackageReceiver();
     }
 
@@ -383,7 +387,7 @@ public class MainActivity extends Activity {
         left.addView(hintView, new LinearLayout.LayoutParams(dp(620), WRAP));
         header.addView(left, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START));
 
-        // Top right: VPN city (only when connected), VPN button, settings cog, clock
+        // Top right: VPN city (only when connected), VPN button, network, settings cog, clock
         LinearLayout right = new LinearLayout(this);
         right.setOrientation(LinearLayout.HORIZONTAL);
         right.setClipChildren(false);
@@ -408,6 +412,18 @@ public class MainActivity extends Activity {
         vpnDot.setBackground(vpnDotBg);
         vpnBtn.addView(vpnDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
 
+        // Network: Ethernet, Wi-Fi with signal, or amber when there's no internet
+        FrameLayout netBtn = roundButton(network.icon(), () -> network.openSettings());
+        GradientDrawable netDotBg = new GradientDrawable();
+        netDotBg.setShape(GradientDrawable.OVAL);
+        netDotBg.setColor(VPN_OFF);
+        netDotBg.setStroke(dp(2), DARK);
+        View netDot = new View(this);
+        netDot.setBackground(netDotBg);
+        netDot.setVisibility(View.GONE);
+        netBtn.addView(netDot, new FrameLayout.LayoutParams(dp(10), dp(10), Gravity.BOTTOM | Gravity.END));
+        network.setDot(netDot);
+
         cogBtn = roundButton(R.drawable.ic_cog, this::openSettingsMenu);
         cogBtn.setId(View.generateViewId());
 
@@ -415,6 +431,10 @@ public class MainActivity extends Activity {
         blp.topMargin = dp(8);
         blp.rightMargin = dp(10);
         right.addView(vpnBtn, blp);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        nlp.topMargin = dp(8);
+        nlp.rightMargin = dp(10);
+        right.addView(netBtn, nlp);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
         clp.topMargin = dp(8);
         clp.rightMargin = dp(18);
@@ -560,6 +580,10 @@ public class MainActivity extends Activity {
     }
 
     private FrameLayout roundButton(int iconRes, final Runnable onClick) {
+        return roundButton(getDrawable(iconRes).mutate(), onClick);
+    }
+
+    private FrameLayout roundButton(final Drawable icon, final Runnable onClick) {
         final FrameLayout b = new FrameLayout(this);
         b.setFocusable(true);
         b.setClickable(true);
@@ -568,7 +592,6 @@ public class MainActivity extends Activity {
         bg.setColor(0x14FFFFFF);
         b.setBackground(bg);
 
-        final Drawable icon = getDrawable(iconRes).mutate();
         icon.setTint(ICON_IDLE);
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(icon);
@@ -584,7 +607,7 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** The top row (search, tabs, VPN, cog, weather) leaves the big title blank. */
+    /** The top row (search, tabs, VPN, network, cog, weather) leaves the big title blank. */
     private void topRowFocused() {
         titleView.setText(" ");
         metaView.setText("");
